@@ -3,56 +3,306 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CladisTree - Cladogram Formatting Tool</title>
+    <title>CladisTree - Phylogeny Software / Logiciel de Phylogénie</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; line-height: 1.6; }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eaeaea; padding-bottom: 20px; margin-bottom: 20px; }
-        .lang-switch { text-decoration: none; color: #0366d6; font-weight: bold; }
-        .btn { display: inline-block; margin-top: 20px; padding: 12px 24px; background-color: #2ea44f; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
-        .btn:hover { background-color: #2c974b; }
-        .features { background: #f6f8fa; padding: 20px; border-radius: 6px; margin-top: 20px; }
-        h3 { margin-top: 20px; margin-bottom: 10px; color: #24292e; }
-        ul { margin-top: 0; }
+        /* --- VARIABLES & RESET --- */
+        :root {
+            --primary: #2ea44f;
+            --primary-dark: #2c974b;
+            --bg-color: #f6f8fa;
+            --bg-card: #ffffff;
+            --text-main: #24292e;
+            --text-light: #586069;
+            --border-color: #eaecef;
+            --white: #ffffff;
+            --font-main: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-main);
+            color: var(--text-main);
+            background-color: var(--bg-color);
+            line-height: 1.6;
+        }
+
+        /* --- BILINGUAL TOGGLE SYSTEM --- */
+        :lang(fr) .en { display: none !important; }
+        :lang(en) .fr { display: none !important; }
+
+        /* --- NAVIGATION --- */
+        nav {
+            background-color: var(--white);
+            padding: 15px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--text-main);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: -0.5px;
+        }
+
+        .lang-switch button {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 5px 15px;
+            margin-left: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .lang-switch button:hover {
+            background: var(--bg-color);
+        }
+        
+        .lang-switch button.active {
+            background: var(--text-main);
+            color: var(--white);
+            border-color: var(--text-main);
+        }
+
+        /* --- HERO SECTION --- */
+        header {
+            background: var(--white);
+            padding: 80px 20px;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        header h1 {
+            font-size: 2.8rem;
+            margin-bottom: 20px;
+            color: var(--text-main);
+            letter-spacing: -1px;
+        }
+
+        header p {
+            font-size: 1.15rem;
+            max-width: 700px;
+            margin: 0 auto 40px auto;
+            color: var(--text-light);
+        }
+
+        /* --- DOWNLOAD BUTTONS --- */
+        .download-buttons {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+
+        .btn-win { background-color: #0078d7; }
+        .btn-win:hover { background-color: #005a9e; }
+        
+        .btn-mac { background-color: #555555; }
+        .btn-mac:hover { background-color: #333333; }
+        
+        .btn-lin { background-color: #e95420; }
+        .btn-lin:hover { background-color: #c34113; }
+
+        /* --- FEATURES SECTION --- */
+        .features {
+            padding: 60px 20px;
+            max-width: 1100px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            padding: 30px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(149, 157, 165, 0.2);
+        }
+
+        .feature-icon {
+            font-size: 28px;
+            color: var(--text-main);
+            margin-bottom: 15px;
+        }
+
+        .feature-card h3 {
+            margin-bottom: 12px;
+            color: var(--text-main);
+            font-size: 1.2rem;
+        }
+
+        .feature-card p {
+            color: var(--text-light);
+            font-size: 0.95rem;
+        }
+
+        /* --- FOOTER --- */
+        footer {
+            background-color: var(--white);
+            color: var(--text-light);
+            text-align: center;
+            padding: 40px 20px;
+            margin-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
     </style>
 </head>
 <body>
-    <div class="header">
+
+    <!-- NAVIGATION -->
+    <nav>
+        <a href="#" class="logo">
+            <span style="font-size: 24px; color: var(--primary);">&#x25A4;</span> CladisTree
+        </a>
+        <div class="lang-switch">
+            <button id="btn-fr" onclick="setLanguage('fr')">FR</button>
+            <button id="btn-en" onclick="setLanguage('en')">EN</button>
+        </div>
+    </nav>
+
+    <!-- HEADER / HERO -->
+    <header>
         <h1>CladisTree</h1>
-        <a href="fr.html" class="lang-switch">FR (Français)</a>
-    </div>
-    
-    <p><strong>CladisTree</strong> is a cladogram formatting application designed to handle complex trees and manage phylogenetic data.</p>
-    
-    <p>The software automates the layout of evolutionary trees, links taxonomic data sheets to individual nodes, and integrates geological time scales. It is built to support workflows from initial data import to high-resolution export. Available for Windows, macOS, and Linux.</p>
-    
-    <div class="features">
-        <h2>Overview of Features</h2>
         
-        <h3>Layout and Formatting</h3>
-        <ul>
-            <li>Standard and "comb" (pectinate) tree drawing modes.</li>
-            <li>Dynamic monophyletic and paraphyletic grouping frames that adjust automatically as new taxa are added.</li>
-            <li>Customizable themes, including dark mode and high-contrast options for accessibility.</li>
-        </ul>
+        <p class="fr">Application de mise en forme de cladogrammes conçue pour gérer des arbres complexes et des données phylogénétiques, de l'importation initiale à l'exportation haute résolution.</p>
+        <p class="en">Cladogram formatting application designed to handle complex trees and manage phylogenetic data, from initial data import to high-resolution export.</p>
+        
+        <div class="download-buttons">
+            <a href="#" class="btn btn-win">&#x2193; Windows (.exe)</a>
+            <a href="#" class="btn btn-mac">&#x2193; macOS (.dmg)</a>
+            <a href="#" class="btn btn-lin">&#x2193; Linux (.AppImage)</a>
+        </div>
+    </header>
 
-        <h3>Data Management</h3>
-        <ul>
-            <li>Dedicated data sheets for each taxon to record diagnosis, IUCN threat status, bibliography, and synonymy.</li>
-            <li>Automatic species counting and text formatting (e.g., automatic italics and handling of abbreviations like <em>X. xxx</em>).</li>
-        </ul>
+    <!-- FEATURES -->
+    <section class="features">
+        
+        <!-- Feature 1 -->
+        <div class="feature-card">
+            <div class="feature-icon">&#x25A3;</div>
+            <h3 class="fr">Mise en page des arbres</h3>
+            <h3 class="en">Tree Layout Options</h3>
+            <p class="fr">Dessinez vos arbres en mode classique ou en peigne. L'esthétique est entièrement personnalisable, avec prise en charge du mode sombre et de thèmes à haut contraste.</p>
+            <p class="en">Draw your trees in standard or comb mode. Aesthetics are fully customizable, including dark mode support and high-contrast themes.</p>
+        </div>
 
-        <h3>Geological Context & Performance</h3>
-        <ul>
-            <li>Interactive geological time scale ranging from the Precambrian to the present, which adjusts based on the dates entered for the taxa.</li>
-            <li>Optimized for large datasets: multi-sheet tree structuring, specific trackpad navigation, keyboard shortcuts, and Xmind file import.</li>
-            <li>Export options: High-resolution images, CSV, and PDF (including the detailed taxon data sheets and time scales).</li>
-        </ul>
-    </div>
+        <!-- Feature 2 -->
+        <div class="feature-card">
+            <div class="feature-icon">&#x25EB;</div>
+            <h3 class="fr">Cadres dynamiques</h3>
+            <h3 class="en">Dynamic Frames</h3>
+            <p class="fr">Regroupez visuellement les taxons grâce à des cadres monophylétiques ou paraphylétiques dynamiques qui s'ajustent automatiquement lors de nouveaux ajouts.</p>
+            <p class="en">Visually group taxa using dynamic monophyletic or paraphyletic frames that automatically adjust as new nodes are added.</p>
+        </div>
 
-    <!-- Replace "#" with the actual link to your GitHub Release -->
-    <a href="#" class="btn">&#x2193; Download CladisTree</a>
-    
-    <hr style="margin-top: 50px; border: 0; border-top: 1px solid #eaeaea;">
-    <p style="text-align: center; color: #666;"><small>&#x00A9; 2026 - CladisTree</small></p>
+        <!-- Feature 3 -->
+        <div class="feature-card">
+            <div class="feature-icon">&#x2630;</div>
+            <h3 class="fr">Fiches de données taxinomiques</h3>
+            <h3 class="en">Taxonomic Data Sheets</h3>
+            <p class="fr">Chaque nœud possède une fiche dédiée permettant d'enregistrer des informations telles que la diagnose, le statut de menace UICN, la synonymie et la bibliographie.</p>
+            <p class="en">Each node has a dedicated data sheet to record information such as diagnosis, IUCN threat status, synonymy, and bibliography.</p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="feature-card">
+            <div class="feature-icon">&#x2699;</div>
+            <h3 class="fr">Automatisation</h3>
+            <h3 class="en">Automation Features</h3>
+            <p class="fr">Le logiciel gère automatiquement le comptage des espèces, la mise en italique et le traitement des abréviations nomenclaturales (ex: X. xxx).</p>
+            <p class="en">The software automatically handles species counting, text italicization, and formatting of nomenclatural abbreviations (e.g., X. xxx).</p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="feature-card">
+            <div class="feature-icon">&#x231A;</div>
+            <h3 class="fr">Contexte géologique</h3>
+            <h3 class="en">Geological Context</h3>
+            <p class="fr">Intégration d'une échelle temporelle interactive couvrant du Précambrien à la période actuelle, qui s'ajuste dynamiquement aux dates de vos taxons.</p>
+            <p class="en">Integration of an interactive geological time scale ranging from the Precambrian to the present, dynamically adjusting to your taxa's dates.</p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="feature-card">
+            <div class="feature-icon">&#x2192;</div>
+            <h3 class="fr">Performances & Exportations</h3>
+            <h3 class="en">Performance & Export</h3>
+            <p class="fr">Optimisé pour les jeux de données massifs (arborescence multi-feuilles, import Xmind). Exportez en images haute résolution, CSV ou PDF incluant les fiches détaillées.</p>
+            <p class="en">Optimized for massive datasets (multi-sheet structures, Xmind import). Export to high-resolution images, CSV, or PDF including detailed sheets.</p>
+        </div>
+
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+        <p>&copy; 2026 CladisTree. <a href="#">GitHub Repository</a></p>
+    </footer>
+
+    <!-- JAVASCRIPT -->
+    <script>
+        function setLanguage(lang) {
+            document.documentElement.lang = lang;
+            localStorage.setItem('cladistree_web_lang', lang);
+            
+            // Mise à jour visuelle des boutons
+            document.getElementById('btn-fr').classList.remove('active');
+            document.getElementById('btn-en').classList.remove('active');
+            document.getElementById('btn-' + lang).classList.add('active');
+        }
+
+        window.onload = () => {
+            const savedLang = localStorage.getItem('cladistree_web_lang');
+            if (savedLang) {
+                setLanguage(savedLang);
+            } else {
+                const userLang = navigator.language || navigator.userLanguage;
+                if (userLang.startsWith('fr')) {
+                    setLanguage('fr');
+                } else {
+                    setLanguage('en');
+                }
+            }
+        };
+    </script>
 </body>
 </html>
