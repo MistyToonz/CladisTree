@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CladisTree - Outil de formatage de cladogrammes</title>
+    <style>
+        :root {
+            --primary-color: #2ea44f;
+            --text-main: #24292e;
+            --text-muted: #586069;
+            --bg-color: #ffffff;
+            --bg-offset: #f6f8fa;
+            --border-color: #eaecef;
+        }
+
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; 
+            max-width: 900px; 
+            margin: 0 auto; 
+            padding: 40px 20px; 
+            color: var(--text-main); 
+            line-height: 1.6;
+            background-color: var(--bg-color);
+        }
+
+        /* En-tête */
+        .header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            border-bottom: 1px solid var(--border-color); 
+            padding-bottom: 20px; 
+            margin-bottom: 40px; 
+        }
+        
+        .header h1 { margin: 0; font-size: 2em; letter-spacing: -0.5px; }
+        .lang-switch { text-decoration: none; color: #0366d6; font-weight: 600; font-size: 0.9em; border: 1px solid #0366d6; padding: 5px 10px; border-radius: 4px; transition: all 0.2s; }
+        .lang-switch:hover { background-color: #0366d6; color: white; }
+
+        /* Introduction */
+        .intro { font-size: 1.15em; color: var(--text-muted); margin-bottom: 40px; }
+
+        /* Grille des fonctionnalités (Design dynamique) */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 50px;
+        }
+
+        .feature-card {
+            background: var(--bg-offset);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 25px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(149, 157, 165, 0.2);
+        }
+
+        .feature-card h3 { margin-top: 0; font-size: 1.2em; border-bottom: 2px solid var(--border-color); padding-bottom: 10px; }
+        .feature-card ul { padding-left: 20px; margin-bottom: 0; font-size: 0.95em; color: var(--text-muted); }
+        .feature-card li { margin-bottom: 8px; }
+
+        /* Section Téléchargements */
+        .download-section {
+            text-align: center;
+            background: var(--bg-offset);
+            padding: 40px 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .download-buttons {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+
+        .btn-win { background-color: #0078d7; }
+        .btn-win:hover { background-color: #005a9e; }
+        
+        .btn-mac { background-color: #555555; }
+        .btn-mac:hover { background-color: #333333; }
+        
+        .btn-lin { background-color: #e95420; }
+        .btn-lin:hover { background-color: #c34113; }
+
+        .footer { text-align: center; color: var(--text-muted); margin-top: 60px; font-size: 0.9em; border-top: 1px solid var(--border-color); padding-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>CladisTree</h1>
+        <a href="index.html" class="lang-switch">EN (English)</a>
+    </div>
+    
+    <div class="intro">
+        <p><strong>CladisTree</strong> est une application de mise en forme de cladogrammes conçue pour gérer des arbres complexes et des données phylogénétiques.</p>
+        <p>Le logiciel automatise la mise en page des arbres évolutifs, relie des fiches taxinomiques aux nœuds individuels et intègre des échelles de temps géologiques. Il est conçu pour accompagner votre flux de travail, de l'importation initiale des données jusqu'à l'exportation haute résolution.</p>
+    </div>
+    
+    <div class="features-grid">
+        <div class="feature-card">
+            <h3>&#x25A3; Mise en forme et affichage</h3>
+            <ul>
+                <li>Modes de dessin classique et en peigne.</li>
+                <li>Cadres de regroupement monophylétiques et paraphylétiques dynamiques qui s'ajustent automatiquement.</li>
+                <li>Thèmes personnalisables (mode sombre et options à haut contraste).</li>
+            </ul>
+        </div>
+
+        <div class="feature-card">
+            <h3>&#x2630; Gestion des données</h3>
+            <ul>
+                <li>Fiches de données dédiées pour chaque taxon (diagnose, statut UICN, bibliographie, synonymie).</li>
+                <li>Comptage automatique des espèces et formatage du texte (mise en italique, gestion des abréviations).</li>
+            </ul>
+        </div>
+
+        <div class="feature-card">
+            <h3>&#x231A; Contexte & Performances</h3>
+            <ul>
+                <li>Échelle temporelle géologique interactive (du Précambrien à nos jours).</li>
+                <li>Optimisé pour les grands jeux de données (arborescence multi-feuilles, raccourcis clavier, import Xmind).</li>
+                <li>Exportations multiples : Images haute résolution, CSV et PDF (avec fiches détaillées).</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="download-section">
+        <h2>Télécharger CladisTree</h2>
+        <p style="color: var(--text-muted);">Sélectionnez la version correspondant à votre système d'exploitation.</p>
+        
+        <div class="download-buttons">
+            <!-- Remplacez les "#" par les liens directs vers vos fichiers d'installation sur GitHub Releases -->
+            <a href="#" class="btn btn-win">&#x2193; Windows (.exe)</a>
+            <a href="#" class="btn btn-mac">&#x2193; macOS (.dmg)</a>
+            <a href="#" class="btn btn-lin">&#x2193; Linux (.AppImage)</a>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>&#x00A9; 2026 - CladisTree</p>
+    </div>
+</body>
+</html>
