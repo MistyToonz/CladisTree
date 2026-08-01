@@ -1,0 +1,62 @@
+name: Build CladisTree
+
+# Deux façons de lancer une compilation :
+#  - manuellement, onglet Actions > Build CladisTree > Run workflow
+#  - automatiquement, en poussant un tag de version (ex : git tag 1.3.2 && git push --tags)
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    # fail-fast: false => si le Mac échoue, Linux et Windows continuent quand même.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux (.deb + .rpm)
+          - os: macos-latest
+            label: macOS (.zip)
+          - os: windows-latest
+            label: Windows (.exe)
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # maker-deb a besoin de dpkg et fakeroot, maker-rpm a besoin de rpm.
+      # Sans ça, la compilation Linux s'arrête au moment de fabriquer le paquet.
+      - name: Outils de paquetage (Linux uniquement)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y dpkg fakeroot rpm
+
+      - name: Installer les dépendances
+        run: npm install
+
+      # macOS : on produit les deux architectures, Apple Silicon et Intel.
+      - name: Compiler (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          npm run make -- --arch=arm64
+          npm run make -- --arch=x64
+
+      - name: Compiler (Linux et Windows)
+        if: runner.os != 'macOS'
+        run: npm run make
+
+      - name: Récupérer les installateurs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cladistree-${{ runner.os }}
+          path: out/make/**/*
+          if-no-files-found: errors
