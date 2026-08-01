@@ -14,6 +14,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     icon: './icon',
     asar: true,
+    executableName: 'cladistree'
   },
   rebuildConfig: {},
   makers: [
