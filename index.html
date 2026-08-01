@@ -83,6 +83,14 @@ a{color:inherit}
 .nav__strat{height:3px;display:flex}
 .nav__strat i{flex:1}
 
+/* Liens d'ancrage dans la barre de navigation */
+.navlinks{display:flex;gap:22px;margin-left:auto;margin-right:22px}
+.navlinks a{
+  font-size:13.5px;color:var(--ink-2);text-decoration:none;
+  border-bottom:1px solid transparent;padding-bottom:2px;transition:.15s;
+}
+.navlinks a:hover{color:var(--ink);border-color:var(--ink-3)}
+
 .langs{display:flex;gap:2px}
 .langs button{
   font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.06em;
@@ -241,12 +249,60 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
   font-family:var(--mono);font-size:12px;color:var(--ink-3)}
 .foot a{color:var(--ink-2)}
 
+/* ------------------- crédit / citation ---------------------- */
+.cite{
+  background:var(--card);border:1px solid var(--rule);border-radius:5px;
+  padding:18px 20px;margin-top:22px;
+  display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+}
+.cite code{
+  font-family:var(--mono);font-size:13.5px;color:var(--ink);
+  line-height:1.5;flex:1;min-width:240px;
+}
+.copy{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
+  background:var(--ink);color:var(--paper);border:1px solid var(--ink);
+  padding:7px 13px;border-radius:4px;cursor:pointer;transition:.15s;white-space:nowrap;
+}
+.copy:hover{background:transparent;color:var(--ink)}
+.copy[data-done="1"]{background:#2E7D32;border-color:#2E7D32;color:#fff}
+
+/* ------------- fenêtre d'aide au premier lancement ---------- */
+.sheet{
+  position:fixed;inset:0;z-index:200;display:none;
+  align-items:center;justify-content:center;padding:20px;
+  background:rgba(16,22,19,.45);backdrop-filter:blur(3px);
+}
+.sheet[data-open="1"]{display:flex}
+.sheet__box{
+  background:var(--card);border:1px solid var(--rule);border-radius:6px;
+  max-width:520px;width:100%;padding:26px 28px;
+  box-shadow:0 20px 60px rgba(0,0,0,.25);
+  max-height:86vh;overflow:auto;
+}
+.sheet__box h3{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:-.015em}
+.sheet__box p{color:var(--ink-2);margin-top:12px;font-size:14.5px}
+.sheet__box ol{margin:14px 0 0 20px;color:var(--ink-2);font-size:14.5px}
+.sheet__box li{margin-bottom:7px}
+.sheet__box pre{
+  background:var(--paper-2);border:1px solid var(--rule);border-radius:4px;
+  padding:11px 13px;margin-top:14px;overflow-x:auto;
+  font-family:var(--mono);font-size:12.5px;color:var(--ink);
+}
+.sheet__foot{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+.sheet__foot button{
+  font-size:13.5px;padding:9px 18px;border-radius:4px;cursor:pointer;
+  background:var(--ink);color:var(--paper);border:1px solid var(--ink);transition:.15s;
+}
+.sheet__foot button:hover{background:transparent;color:var(--ink)}
+
 /* ------------------------- révélation ----------------------- */
 .rise{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
 .rise.seen{opacity:1;transform:none}
 
 /* ------------------------- responsive ----------------------- */
 @media (max-width:880px){
+  .navlinks{display:none}
   .hero__grid,.split,.split--sheet{grid-template-columns:1fr;gap:34px}
   .hero__side{padding-bottom:0}
   .split figure{order:-1}
@@ -271,6 +327,11 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
       <img src="assets/ct.png" alt="" width="30" height="30">
       <b>CladisTree</b>
     </a>
+    <div class="navlinks">
+      <a href="#modes"><span class="fr">Aperçu</span><span class="en">Overview</span></a>
+      <a href="#credit"><span class="fr">Créditer</span><span class="en">Credit</span></a>
+      <a href="#download"><span class="fr">Télécharger</span><span class="en">Download</span></a>
+    </div>
     <div class="langs" role="group" aria-label="Langue / Language">
       <button id="btn-fr" onclick="setLanguage('fr')" aria-pressed="false">FR</button>
       <button id="btn-en" onclick="setLanguage('en')" aria-pressed="false">EN</button>
@@ -294,12 +355,12 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
 
       <!-- ▸ Remplacez les # par les liens de vos releases GitHub. -->
       <div class="dl">
-        <a href="#"><span>↓</span> Windows <span>.exe</span></a>
-        <a href="#"><span>↓</span> macOS <span>.dmg</span></a>
-        <a href="#"><span>↓</span> Linux <span>.AppImage</span></a>
+        <a class="dl-win" data-os="win" href="https://github.com/MistyToonz/CladisTree/releases/latest"><span>↓</span> Windows <span>.exe</span></a>
+        <a class="dl-mac" data-os="mac" href="https://github.com/MistyToonz/CladisTree/releases/latest"><span>↓</span> macOS <span>.zip</span></a>
+        <a class="dl-lin" data-os="lin" href="https://github.com/MistyToonz/CladisTree/releases/latest"><span>↓</span> Linux <span>.deb</span></a>
       </div>
-      <p class="dl__note fr">Version 1.3.1 · gratuit et open source</p>
-      <p class="dl__note en">Version 1.3.1 · free and open source</p>
+      <p class="dl__note fr">Version <span class="js-version">…</span> · gratuit et open source · licence MIT</p>
+      <p class="dl__note en">Version <span class="js-version">…</span> · free and open source · MIT licence</p>
     </div>
 
     <div class="hero__side">
@@ -394,7 +455,7 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
 </section>
 
 <!-- ========================== MODES ============================ -->
-<section class="sec sec--alt">
+<section class="sec sec--alt" id="modes">
   <div class="wrap">
     <div class="sec__head rise">
       <p class="eyebrow fr">Mise en page</p>
@@ -576,28 +637,68 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
   </div>
 </section>
 
+<!-- ========================== CRÉDIT =========================== -->
+<section class="sec" id="credit">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <p class="eyebrow fr">Crédit</p>
+      <p class="eyebrow en">Credit</p>
+      <h2 class="fr">Comment me créditer</h2>
+      <h2 class="en">How to credit the tool</h2>
+      <p class="fr">CladisTree est gratuit et le restera. Si une de vos figures a été produite avec, le mentionner dans la légende fait toujours plaisir — et c'est à peu près le seul moyen qu'a l'outil de se faire connaître. Une ligne suffit, aucune formule imposée.</p>
+      <p class="en">CladisTree is free and will stay that way. If one of your figures was produced with it, a mention in the caption is always appreciated — and it is about the only way the tool gets known. One line is enough; no set formula.</p>
+    </div>
+
+    <div class="cite rise">
+      <code id="cite-fr" class="fr">Figure réalisée avec CladisTree (N. Ennasri).</code>
+      <code id="cite-en" class="en">Figure made with CladisTree (N. Ennasri).</code>
+      <button class="copy" id="btn-copy" data-copy-fr="Figure réalisée avec CladisTree (N. Ennasri)." data-copy-en="Figure made with CladisTree (N. Ennasri).">
+        <span class="fr">Copier</span><span class="en">Copy</span>
+      </button>
+    </div>
+
+    <p class="dl__note fr" style="margin-top:16px;">Aucune obligation : la licence MIT n'exige rien de tel. C'est une demande, pas une condition.</p>
+    <p class="dl__note en" style="margin-top:16px;">Not a requirement: the MIT licence asks for nothing of the sort. This is a request, not a condition.</p>
+  </div>
+</section>
+
 <!-- ======================= TÉLÉCHARGER ========================= -->
-<section class="sec sec--alt end">
+<section class="sec sec--alt end" id="download">
   <div class="wrap">
     <h2 class="fr">Télécharger CladisTree</h2>
     <h2 class="en">Download CladisTree</h2>
     <!-- ▸ Remplacez les # par les liens de vos releases GitHub. -->
     <div class="dl">
-      <a href="#"><span>↓</span> Windows <span>.exe</span></a>
-      <a href="#"><span>↓</span> macOS <span>.dmg</span></a>
-      <a href="#"><span>↓</span> Linux <span>.AppImage</span></a>
+      <a class="dl-win" data-os="win" href="https://github.com/MistyToonz/CladisTree/releases/latest"><span>↓</span> Windows <span>.exe</span></a>
+      <a class="dl-mac" data-os="mac" href="https://github.com/MistyToonz/CladisTree/releases/latest"><span>↓</span> macOS <span>.zip</span></a>
+      <a class="dl-lin" data-os="lin" href="https://github.com/MistyToonz/CladisTree/releases/latest"><span>↓</span> Linux <span>.deb</span></a>
     </div>
-    <p class="dl__note fr">Version 1.3.1 · gratuit et open source</p>
-    <p class="dl__note en">Version 1.3.1 · free and open source</p>
+    <p class="dl__note fr">Version <span class="js-version">…</span> · gratuit et open source · licence MIT</p>
+    <p class="dl__note en">Version <span class="js-version">…</span> · free and open source · MIT licence</p>
   </div>
 </section>
 
 <footer>
   <div class="wrap foot">
-    <span>© 2026 CladisTree — Nassim Ennasri</span>
-    <span><a href="#">GitHub</a></span>
+    <span>© 2026 CladisTree — Nassim Ennasri · <span class="fr">licence MIT</span><span class="en">MIT licence</span></span>
+    <span>
+      <a href="https://github.com/MistyToonz/CladisTree">GitHub</a> ·
+      <a href="https://github.com/MistyToonz/CladisTree/issues"><span class="fr">Signaler un problème</span><span class="en">Report an issue</span></a> ·
+      <a href="https://github.com/MistyToonz/CladisTree/releases"><span class="fr">Historique des versions</span><span class="en">Release history</span></a>
+    </span>
   </div>
 </footer>
+
+<!-- ============ AIDE AU PREMIER LANCEMENT (par système) ============ -->
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <div class="sheet__box">
+    <h3 id="sheet-title"></h3>
+    <div id="sheet-body"></div>
+    <div class="sheet__foot">
+      <button id="sheet-ok"><span class="fr">J'ai compris</span><span class="en">Got it</span></button>
+    </div>
+  </div>
+</div>
 
 <script>
 /* --- bascule de langue ---------------------------------------- */
@@ -617,6 +718,153 @@ setLanguage(document.documentElement.lang);
     i.style.background = getComputedStyle(seg).getPropertyValue('--seg-c');
     i.style.flexGrow = seg.style.flexGrow;
     host.appendChild(i);
+  });
+})();
+
+/* --- liens de téléchargement résolus depuis la dernière release ---
+   Les noms de fichiers produits par Electron Forge contiennent le numéro
+   de version : les écrire en dur obligerait à modifier cette page à
+   chaque publication. On interroge donc l'API au chargement.
+   En cas d'échec (quota, hors ligne), les boutons gardent leur lien de
+   repli vers la page des releases, qui reste parfaitement utilisable. */
+(function () {
+  var REPO = 'MistyToonz/CladisTree';
+
+  var pick = function (assets, tests) {
+    for (var i = 0; i < tests.length; i++) {
+      for (var j = 0; j < assets.length; j++) {
+        if (tests[i](assets[j].name)) return assets[j];
+      }
+    }
+    return null;
+  };
+
+  var setLink = function (cls, asset) {
+    if (!asset) return;
+    var mo = Math.max(1, Math.round(asset.size / 1048576));
+    document.querySelectorAll('a.' + cls).forEach(function (a) {
+      a.href = asset.browser_download_url;
+      var tail = a.querySelector('span:last-child');
+      if (tail) tail.textContent = tail.textContent.trim() + ' · ' + mo + ' Mo';
+    });
+  };
+
+  fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
+    headers: { 'Accept': 'application/vnd.github+json' }
+  })
+  .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(function (rel) {
+    var v = String(rel.tag_name || '').replace(/^v/i, '');
+    if (v) {
+      document.querySelectorAll('.js-version').forEach(function (el) { el.textContent = v; });
+    }
+    var a = rel.assets || [];
+    setLink('dl-win', pick(a, [
+      function (n) { return /setup.*\.exe$/i.test(n); },
+      function (n) { return /\.exe$/i.test(n); }
+    ]));
+    // Un .zip peut aussi être produit pour Linux : on cible d'abord ceux
+    // qui portent explicitement darwin / mac dans leur nom.
+    setLink('dl-mac', pick(a, [
+      function (n) { return /\.dmg$/i.test(n); },
+      function (n) { return /\.zip$/i.test(n) && /darwin|mac|osx/i.test(n); },
+      // Repli prudent : une archive .zip peut aussi être produite pour Linux
+      // ou Windows. Sans marqueur de système, on l'écarte plutôt que de
+      // proposer un fichier inutilisable sous le bouton macOS.
+      function (n) { return /\.zip$/i.test(n) && !/linux|win|x86_64|amd64/i.test(n); }
+    ]));
+    setLink('dl-lin', pick(a, [
+      function (n) { return /\.deb$/i.test(n); },
+      function (n) { return /\.appimage$/i.test(n); }
+    ]));
+  })
+  .catch(function () { /* les liens de repli suffisent */ });
+})();
+
+/* --- aide au premier lancement, propre à chaque système ---------
+   Les binaires ne sont pas signés : macOS et Windows affichent tous deux
+   un avertissement au premier lancement. Autant le dire avant plutôt que
+   de laisser croire à un fichier corrompu. */
+(function () {
+  var sheet = document.getElementById('sheet');
+  var titleEl = document.getElementById('sheet-title');
+  var bodyEl = document.getElementById('sheet-body');
+  if (!sheet) return;
+
+  var CONTENT = {
+    mac: {
+      fr: ['Premier lancement sur macOS',
+        '<p>macOS refusera d\'ouvrir l\'application la première fois : elle n\'est pas signée par un certificat Apple, lequel est payant et annuel. Le fichier n\'est pas endommagé.</p>' +
+        '<ol><li>Décompressez l\'archive et placez <b>CladisTree</b> dans le dossier Applications.</li>' +
+        '<li><b>Clic droit</b> sur l\'application, puis <b>Ouvrir</b>. Un double-clic ne suffit pas.</li>' +
+        '<li>Dans la fenêtre d\'avertissement, cliquez de nouveau sur <b>Ouvrir</b>.</li></ol>' +
+        '<p>Les lancements suivants se font normalement.</p>'],
+      en: ['First launch on macOS',
+        '<p>macOS will refuse to open the app the first time: it is not signed with an Apple certificate, which is paid and yearly. The file is not damaged.</p>' +
+        '<ol><li>Unzip the archive and move <b>CladisTree</b> to your Applications folder.</li>' +
+        '<li><b>Right-click</b> the app, then <b>Open</b>. Double-clicking will not work.</li>' +
+        '<li>In the warning dialog, click <b>Open</b> again.</li></ol>' +
+        '<p>Later launches behave normally.</p>']
+    },
+    win: {
+      fr: ['Premier lancement sur Windows',
+        '<p>Windows peut afficher « Windows a protégé votre ordinateur ». L\'installateur n\'est pas signé par un certificat commercial, ce qui déclenche SmartScreen.</p>' +
+        '<ol><li>Cliquez sur <b>Informations complémentaires</b>.</li>' +
+        '<li>Puis sur <b>Exécuter quand même</b>.</li></ol>'],
+      en: ['First launch on Windows',
+        '<p>Windows may show “Windows protected your PC”. The installer is not signed with a commercial certificate, which triggers SmartScreen.</p>' +
+        '<ol><li>Click <b>More info</b>.</li><li>Then <b>Run anyway</b>.</li></ol>']
+    },
+    lin: {
+      fr: ['Installation sur Linux',
+        '<p>Le paquet s\'installe d\'un double-clic avec la logithèque de votre distribution, ou en ligne de commande :</p>' +
+        '<pre>sudo dpkg -i cladistree_*.deb\nsudo apt-get install -f</pre>' +
+        '<p>La seconde commande n\'est utile que si des dépendances manquent.</p>'],
+      en: ['Installing on Linux',
+        '<p>Double-click the package to install it through your distribution\'s software centre, or use the terminal:</p>' +
+        '<pre>sudo dpkg -i cladistree_*.deb\nsudo apt-get install -f</pre>' +
+        '<p>The second command is only needed if dependencies are missing.</p>']
+    }
+  };
+
+  var close = function () { sheet.removeAttribute('data-open'); };
+
+  document.querySelectorAll('a[data-os]').forEach(function (a) {
+    a.addEventListener('click', function () {
+      // Le téléchargement part normalement : la fenêtre informe, elle ne bloque pas.
+      var c = CONTENT[a.getAttribute('data-os')];
+      if (!c) return;
+      var lang = document.documentElement.lang === 'en' ? 'en' : 'fr';
+      titleEl.textContent = c[lang][0];
+      bodyEl.innerHTML = c[lang][1];
+      sheet.setAttribute('data-open', '1');
+    });
+  });
+
+  document.getElementById('sheet-ok').addEventListener('click', close);
+  sheet.addEventListener('click', function (e) { if (e.target === sheet) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+})();
+
+/* --- copie de la mention de crédit ------------------------------ */
+(function () {
+  var btn = document.getElementById('btn-copy');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var lang = document.documentElement.lang === 'en' ? 'en' : 'fr';
+    var txt = btn.getAttribute('data-copy-' + lang);
+    var done = function () {
+      btn.setAttribute('data-done', '1');
+      setTimeout(function () { btn.removeAttribute('data-done'); }, 1600);
+    };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(txt).then(done, function () {});
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
   });
 })();
 
