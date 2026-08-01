@@ -1,0 +1,29 @@
+name: Build Linux
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Installation des dependances
+        run: npm install
+
+      - name: Compilation de l'application
+        run: npm run make -- --platform=linux --targets=@electron-forge/maker-deb
+
+      - name: Sauvegarde du fichier genere
+        uses: actions/upload-artifact@v4
+        with:
+          name: CladisTree-Linux
+          path: out/make/**/*.deb
