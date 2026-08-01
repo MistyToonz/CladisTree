@@ -1,308 +1,640 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CladisTree - Phylogeny Software / Logiciel de Phylogénie</title>
-    <style>
-        /* --- VARIABLES & RESET --- */
-        :root {
-            --primary: #2ea44f;
-            --primary-dark: #2c974b;
-            --bg-color: #f6f8fa;
-            --bg-card: #ffffff;
-            --text-main: #24292e;
-            --text-light: #586069;
-            --border-color: #eaecef;
-            --white: #ffffff;
-            --font-main: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CladisTree — Logiciel de phylogénie / Phylogeny software</title>
+<meta name="description" content="Application de bureau pour dessiner, annoter et exporter des arbres phylogénétiques : cladogrammes, phénogrammes et chronogrammes.">
+<link rel="icon" href="assets/ct.png">
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<!-- La langue est fixée avant le premier rendu pour éviter un clignotement. -->
+<script>
+  (function () {
+    var l = localStorage.getItem('cladistree_web_lang');
+    if (!l) l = (navigator.language || 'en').toLowerCase().indexOf('fr') === 0 ? 'fr' : 'en';
+    document.documentElement.lang = l;
+  })();
+</script>
 
-        body {
-            font-family: var(--font-main);
-            color: var(--text-main);
-            background-color: var(--bg-color);
-            line-height: 1.6;
-        }
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&family=Spectral:ital,wght@0,400;0,600;1,400;1,600&display=swap" rel="stylesheet">
 
-        /* --- BILINGUAL TOGGLE SYSTEM --- */
-        :lang(fr) .en { display: none !important; }
-        :lang(en) .fr { display: none !important; }
+<style>
+/* ============================================================
+   CladisTree — page de présentation
+   Palette : encre et papier de planche scientifique, plus les
+   couleurs stratigraphiques officielles (ICS) reprises du logiciel.
+   ============================================================ */
+:root{
+  --paper:#F5F6F4;
+  --paper-2:#EBEEE9;
+  --card:#FFFFFF;
+  --ink:#101613;
+  --ink-2:#59635C;
+  --ink-3:#8A938C;
+  --rule:#DBE0D9;
+  --red:#FF3131;      /* logo */
+  --blue:#004AAD;     /* logo */
 
-        /* --- NAVIGATION --- */
-        nav {
-            background-color: var(--white);
-            padding: 15px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
+  --w:1180px;
+  --pad:clamp(20px,5vw,48px);
+  --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --serif:"Spectral",Georgia,serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",monospace;
+}
 
-        .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: var(--text-main);
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            letter-spacing: -0.5px;
-        }
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--paper);color:var(--ink);
+  font-family:var(--sans);font-size:16px;line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+img{display:block;max-width:100%;height:auto}
+a{color:inherit}
 
-        .lang-switch button {
-            background: none;
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-            padding: 5px 15px;
-            margin-left: 5px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.2s;
-        }
+/* --- bascule bilingue --------------------------------------- */
+:lang(fr) .en{display:none !important}
+:lang(en) .fr{display:none !important}
 
-        .lang-switch button:hover {
-            background: var(--bg-color);
-        }
-        
-        .lang-switch button.active {
-            background: var(--text-main);
-            color: var(--white);
-            border-color: var(--text-main);
-        }
+/* --- utilitaires -------------------------------------------- */
+.wrap{max-width:var(--w);margin:0 auto;padding-inline:var(--pad)}
+.eyebrow{
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);
+}
+:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:2px}
 
-        /* --- HERO SECTION --- */
-        header {
-            background: var(--white);
-            padding: 80px 20px;
-            text-align: center;
-            border-bottom: 1px solid var(--border-color);
-        }
+/* ============================ NAV ============================ */
+.nav{
+  position:sticky;top:0;z-index:100;background:rgba(245,246,244,.92);
+  backdrop-filter:saturate(1.4) blur(10px);
+  border-bottom:1px solid var(--rule);
+}
+.nav__in{
+  max-width:var(--w);margin:0 auto;padding:12px var(--pad);
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none}
+.brand img{width:30px;height:30px}
+.brand b{font-family:var(--serif);font-size:21px;font-weight:600;letter-spacing:-.01em}
+/* Écho discret de la frise sous la barre de navigation. */
+.nav__strat{height:3px;display:flex}
+.nav__strat i{flex:1}
 
-        header h1 {
-            font-size: 2.8rem;
-            margin-bottom: 20px;
-            color: var(--text-main);
-            letter-spacing: -1px;
-        }
+.langs{display:flex;gap:2px}
+.langs button{
+  font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.06em;
+  background:none;border:1px solid var(--rule);color:var(--ink-2);
+  padding:5px 11px;cursor:pointer;border-radius:3px;transition:.15s;
+}
+.langs button:hover{border-color:var(--ink-3);color:var(--ink)}
+.langs button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
 
-        header p {
-            font-size: 1.15rem;
-            max-width: 700px;
-            margin: 0 auto 40px auto;
-            color: var(--text-light);
-        }
+/* ============================ HERO =========================== */
+.hero{padding:clamp(56px,10vw,104px) 0 clamp(36px,6vw,60px)}
+.hero__grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:clamp(28px,6vw,72px);align-items:end}
+.hero h1{
+  font-family:var(--serif);font-weight:600;
+  font-size:clamp(38px,6.4vw,68px);line-height:1.04;letter-spacing:-.025em;
+  margin:14px 0 0;text-wrap:balance;
+}
+.hero h1 em{font-style:italic;color:var(--blue)}
+.hero__lead{
+  font-size:clamp(16px,1.6vw,18px);color:var(--ink-2);
+  max-width:56ch;margin-top:20px;
+}
+.hero__side{padding-bottom:6px}
+.hero__spec{border-top:1px solid var(--rule)}
+.hero__spec div{
+  display:flex;justify-content:space-between;gap:16px;
+  padding:9px 0;border-bottom:1px solid var(--rule);
+  font-family:var(--mono);font-size:12.5px;color:var(--ink-2);
+}
+.hero__spec div span:last-child{color:var(--ink);text-align:right}
 
-        /* --- DOWNLOAD BUTTONS --- */
-        .download-buttons {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-top: 20px;
-        }
+/* --- téléchargements ---------------------------------------- */
+.dl{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+.dl a{
+  display:inline-flex;align-items:baseline;gap:9px;text-decoration:none;
+  background:var(--ink);color:var(--paper);
+  padding:11px 19px;border-radius:4px;
+  font-size:14.5px;font-weight:500;
+  border:1px solid var(--ink);transition:.16s;
+}
+.dl a:hover{background:transparent;color:var(--ink);transform:translateY(-1px)}
+.dl a span{font-family:var(--mono);font-size:11.5px;opacity:.72}
+.dl__note{margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
 
-        .btn {
-            display: inline-block;
-            padding: 12px 24px;
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 600;
-            transition: background-color 0.2s;
-        }
+/* ====================== FRISE (signature) ==================== */
+.strat{display:flex;width:100%;height:38px;border-block:1px solid var(--rule)}
+.strat__seg{
+  position:relative;flex-basis:0;min-width:26px;
+  background:var(--seg-c);color:var(--seg-ink);
+  display:grid;place-items:center;cursor:default;
+  transition:filter .15s;
+}
+.strat__seg:hover{filter:brightness(1.09)}
+.strat__abbr{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.04em}
+.strat__pop{
+  position:absolute;bottom:calc(100% + 9px);left:50%;translate:-50% 0;
+  background:var(--ink);color:var(--paper);
+  padding:7px 11px;border-radius:4px;white-space:nowrap;
+  display:grid;gap:1px;opacity:0;visibility:hidden;transition:.16s;
+  pointer-events:none;z-index:5;
+}
+.strat__pop b{font-family:var(--serif);font-size:14px;font-weight:600}
+.strat__pop i{font-family:var(--mono);font-style:normal;font-size:11px;opacity:.7}
+.strat__seg:hover .strat__pop{opacity:1;visibility:visible}
+.strat__seg:first-child .strat__pop{left:0;translate:0 0}
+.strat__seg:last-child .strat__pop{left:auto;right:0;translate:0 0}
+.strat__cap{
+  max-width:var(--w);margin:0 auto;padding:9px var(--pad) 0;
+  display:flex;justify-content:space-between;gap:16px;
+  font-family:var(--mono);font-size:11px;color:var(--ink-3);
+}
 
-        .btn-win { background-color: #0078d7; }
-        .btn-win:hover { background-color: #005a9e; }
-        
-        .btn-mac { background-color: #555555; }
-        .btn-mac:hover { background-color: #333333; }
-        
-        .btn-lin { background-color: #e95420; }
-        .btn-lin:hover { background-color: #c34113; }
+/* ========================== SECTIONS ========================= */
+.sec{padding:clamp(60px,9vw,104px) 0}
+.sec--alt{background:var(--paper-2);border-block:1px solid var(--rule)}
+.sec__head{max-width:70ch;margin-bottom:clamp(30px,4vw,48px)}
+.sec__head h2{
+  font-family:var(--serif);font-weight:600;
+  font-size:clamp(26px,3.7vw,40px);line-height:1.14;letter-spacing:-.02em;
+  margin-top:12px;text-wrap:balance;
+}
+.sec__head p{color:var(--ink-2);margin-top:14px;max-width:62ch}
 
-        /* --- FEATURES SECTION --- */
-        .features {
-            padding: 60px 20px;
-            max-width: 1100px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-        }
+/* --------------------- planches (figures) ------------------- */
+figure{margin:0}
+.plate{background:var(--card);border:1px solid var(--rule);border-radius:5px;overflow:hidden}
+.plate img{width:100%}
+.plate figcaption,.cap{
+  padding:12px 16px;border-top:1px solid var(--rule);
+  font-size:13.5px;color:var(--ink-2);line-height:1.5;
+}
+.cap b,.plate figcaption b{
+  font-family:var(--mono);font-size:11.5px;font-weight:500;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--ink);
+  margin-right:8px;
+}
+/* Les noms de taxons suivent la convention : italique, serif. */
+.taxon{font-family:var(--serif);font-style:italic}
 
-        .feature-card {
-            background: var(--bg-card);
-            padding: 30px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
+.bleed{max-width:1560px;margin:0 auto;padding-inline:var(--pad)}
 
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 24px rgba(149, 157, 165, 0.2);
-        }
+/* Vignettes de modes : hauteur commune, cadrage choisi image par image. */
+.shot{position:relative;height:330px;overflow:hidden;background:var(--paper-2)}
+.shot img{width:100%;height:100%;object-fit:cover}
+/* Le dégradé signale une image tronquée : uniquement sur les arbres coupés. */
+.shot--cut::after{
+  content:"";position:absolute;inset:auto 0 0 0;height:110px;
+  background:linear-gradient(to bottom,transparent,var(--card));
+}
 
-        .feature-icon {
-            font-size: 28px;
-            color: var(--text-main);
-            margin-bottom: 15px;
-        }
+/* ----------------------- grille des modes ------------------- */
+.modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:clamp(20px,3vw,34px)}
+.mode__body{padding:20px}
+.mode__body h3{font-family:var(--serif);font-size:21px;font-weight:600;letter-spacing:-.01em}
+.mode__body p{font-size:14.5px;color:var(--ink-2);margin-top:8px}
+.mode__tag{
+  display:inline-block;margin-bottom:11px;padding:3px 9px;border-radius:3px;
+  font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;
+  background:var(--paper-2);color:var(--ink-2);border:1px solid var(--rule);
+}
 
-        .feature-card h3 {
-            margin-bottom: 12px;
-            color: var(--text-main);
-            font-size: 1.2rem;
-        }
+/* ------------------------ deux colonnes --------------------- */
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center}
+.split--sheet{grid-template-columns:minmax(0,.85fr) minmax(0,1fr)}
+.split h3{font-family:var(--serif);font-size:clamp(22px,2.6vw,29px);font-weight:600;letter-spacing:-.015em}
+.split p{color:var(--ink-2);margin-top:14px}
 
-        .feature-card p {
-            color: var(--text-light);
-            font-size: 0.95rem;
-        }
+/* liste de champs de la fiche */
+.fields{display:flex;flex-wrap:wrap;gap:6px;margin-top:22px;list-style:none}
+.fields li{
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-2);
+  background:var(--card);border:1px solid var(--rule);
+  padding:4px 9px;border-radius:3px;
+}
 
-        /* --- FOOTER --- */
-        footer {
-            background-color: var(--white);
-            color: var(--text-light);
-            text-align: center;
-            padding: 40px 20px;
-            margin-top: 20px;
-            border-top: 1px solid var(--border-color);
-        }
+.linkline{display:inline-flex;align-items:center;gap:7px;margin-top:22px;
+  font-family:var(--mono);font-size:12.5px;color:var(--blue);text-decoration:none;
+  border-bottom:1px solid rgba(0,74,173,.3);padding-bottom:2px;transition:.15s}
+.linkline:hover{border-color:var(--blue)}
 
-        footer a {
-            color: var(--primary);
-            text-decoration: none;
-        }
-    </style>
+/* --------------------- capacités (liste) -------------------- */
+.caps{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule);border-radius:5px;overflow:hidden}
+.caps > div{background:var(--paper);padding:22px 24px}
+.caps h3{font-size:15px;font-weight:500;letter-spacing:-.005em}
+.caps p{font-size:14px;color:var(--ink-2);margin-top:6px}
+.caps .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:9px}
+
+/* ---------------------- bas de page ------------------------- */
+.end{text-align:center;padding:clamp(64px,9vw,110px) 0}
+.end h2{font-family:var(--serif);font-size:clamp(28px,4vw,42px);font-weight:600;letter-spacing:-.02em}
+.end .dl{justify-content:center}
+footer{border-top:1px solid var(--rule);padding:26px 0 40px}
+.foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:14px;
+  font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.foot a{color:var(--ink-2)}
+
+/* ------------------------- révélation ----------------------- */
+.rise{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+.rise.seen{opacity:1;transform:none}
+
+/* ------------------------- responsive ----------------------- */
+@media (max-width:880px){
+  .hero__grid,.split,.split--sheet{grid-template-columns:1fr;gap:34px}
+  .hero__side{padding-bottom:0}
+  .split figure{order:-1}
+  .strat{height:32px}
+  .strat__seg{min-width:20px}
+  .strat__abbr{font-size:10px}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .rise{opacity:1;transform:none;transition:none}
+  .dl a:hover{transform:none}
+}
+</style>
+<noscript><style>.rise{opacity:1;transform:none}</style></noscript>
 </head>
 <body>
 
-    <!-- NAVIGATION -->
-    <nav>
-        <a href="#" class="logo">
-            <span style="font-size: 24px; color: var(--primary);">&#x25A4;</span> CladisTree
-        </a>
-        <div class="lang-switch">
-            <button id="btn-fr" onclick="setLanguage('fr')">FR</button>
-            <button id="btn-en" onclick="setLanguage('en')">EN</button>
+<!-- ============================ NAV ============================ -->
+<nav class="nav">
+  <div class="nav__in">
+    <a class="brand" href="#top">
+      <img src="assets/ct.png" alt="" width="30" height="30">
+      <b>CladisTree</b>
+    </a>
+    <div class="langs" role="group" aria-label="Langue / Language">
+      <button id="btn-fr" onclick="setLanguage('fr')" aria-pressed="false">FR</button>
+      <button id="btn-en" onclick="setLanguage('en')" aria-pressed="false">EN</button>
+    </div>
+  </div>
+  <div class="nav__strat" aria-hidden="true" id="nav-strat"></div>
+</nav>
+
+<!-- ============================ HERO =========================== -->
+<header class="hero" id="top">
+  <div class="wrap hero__grid">
+    <div>
+      <p class="eyebrow fr">Logiciel de phylogénie · Windows · macOS · Linux</p>
+      <p class="eyebrow en">Phylogeny software · Windows · macOS · Linux</p>
+
+      <h1 class="fr">Dessiner des arbres phylogénétiques, du cladogramme au <em>chronogramme</em>.</h1>
+      <h1 class="en">Draw phylogenetic trees, from cladogram to <em>chronogram</em>.</h1>
+
+      <p class="hero__lead fr">CladisTree construit, annote et exporte des arbres phylogénétiques. Il est prévu pour les grands jeux de données : arbres à plusieurs milliers de taxons, fiche documentaire sur chaque nœud, export en haute résolution.</p>
+      <p class="hero__lead en">CladisTree builds, annotates and exports phylogenetic trees. It is designed for large datasets: trees with thousands of taxa, a documentary record on every node, and high-resolution export.</p>
+
+      <!-- ▸ Remplacez les # par les liens de vos releases GitHub. -->
+      <div class="dl">
+        <a href="#"><span>↓</span> Windows <span>.exe</span></a>
+        <a href="#"><span>↓</span> macOS <span>.dmg</span></a>
+        <a href="#"><span>↓</span> Linux <span>.AppImage</span></a>
+      </div>
+      <p class="dl__note fr">Version 1.3.1 · gratuit et open source</p>
+      <p class="dl__note en">Version 1.3.1 · free and open source</p>
+    </div>
+
+    <div class="hero__side">
+      <div class="hero__spec">
+        <div><span class="fr">Modes de tracé</span><span class="en">Layout modes</span><span>3</span></div>
+        <div><span class="fr">Échelle des temps</span><span class="en">Time scale</span><span>600–0 Ma</span></div>
+        <div><span class="fr">Étages géologiques</span><span class="en">Geological stages</span><span>100</span></div>
+        <div><span class="fr">Rangs taxinomiques</span><span class="en">Taxonomic ranks</span><span>25</span></div>
+        <div><span class="fr">Exports</span><span class="en">Export formats</span><span>PNG · SVG · PDF · CSV</span></div>
+        <div><span class="fr">Interface</span><span class="en">Interface</span><span>FR · EN</span></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ================== FRISE STRATIGRAPHIQUE =================== -->
+<!-- Couleurs et bornes reprises telles quelles du logiciel (norme ICS). -->
+<div class="strat" id="strat" role="img"
+     aria-label="Échelle des temps géologiques, du Précambrien au Quaternaire">
+        <div class="strat__seg" style="--seg-c:#F0A0B0; --seg-ink:#0E1512; flex-grow:61.2">
+          <span class="strat__abbr">pC</span>
+          <span class="strat__pop"><b class="fr">Précambrien</b><b class="en">Precambrian</b><i>600–538.8 Ma</i></span>
         </div>
-    </nav>
-
-    <!-- HEADER / HERO -->
-    <header>
-        <h1>CladisTree</h1>
-        
-        <p class="fr">Application de mise en forme de cladogrammes conçue pour gérer des arbres complexes et des données phylogénétiques, de l'importation initiale à l'exportation haute résolution.</p>
-        <p class="en">Cladogram formatting application designed to handle complex trees and manage phylogenetic data, from initial data import to high-resolution export.</p>
-        
-        <div class="download-buttons">
-            <a href="#" class="btn btn-win">&#x2193; Windows (.exe)</a>
-            <a href="#" class="btn btn-mac">&#x2193; macOS (.dmg)</a>
-            <a href="#" class="btn btn-lin">&#x2193; Linux (.AppImage)</a>
+        <div class="strat__seg" style="--seg-c:#7FA056; --seg-ink:#0E1512; flex-grow:53.4">
+          <span class="strat__abbr">Cm</span>
+          <span class="strat__pop"><b class="fr">Cambrien</b><b class="en">Cambrian</b><i>538.8–485.4 Ma</i></span>
         </div>
-    </header>
-
-    <!-- FEATURES -->
-    <section class="features">
-        
-        <!-- Feature 1 -->
-        <div class="feature-card">
-            <div class="feature-icon">&#x25A3;</div>
-            <h3 class="fr">Mise en page des arbres</h3>
-            <h3 class="en">Tree Layout Options</h3>
-            <p class="fr">Dessinez vos arbres en mode classique ou en peigne. L'esthétique est entièrement personnalisable, avec prise en charge du mode sombre et de thèmes à haut contraste.</p>
-            <p class="en">Draw your trees in standard or comb mode. Aesthetics are fully customizable, including dark mode support and high-contrast themes.</p>
+        <div class="strat__seg" style="--seg-c:#009270; --seg-ink:#0E1512; flex-grow:41.6">
+          <span class="strat__abbr">O</span>
+          <span class="strat__pop"><b class="fr">Ordovicien</b><b class="en">Ordovician</b><i>485.4–443.8 Ma</i></span>
         </div>
-
-        <!-- Feature 2 -->
-        <div class="feature-card">
-            <div class="feature-icon">&#x25EB;</div>
-            <h3 class="fr">Cadres dynamiques</h3>
-            <h3 class="en">Dynamic Frames</h3>
-            <p class="fr">Regroupez visuellement les taxons grâce à des cadres monophylétiques ou paraphylétiques dynamiques qui s'ajustent automatiquement lors de nouveaux ajouts.</p>
-            <p class="en">Visually group taxa using dynamic monophyletic or paraphyletic frames that automatically adjust as new nodes are added.</p>
+        <div class="strat__seg" style="--seg-c:#B3E1B6; --seg-ink:#0E1512; flex-grow:24.6">
+          <span class="strat__abbr">S</span>
+          <span class="strat__pop"><b class="fr">Silurien</b><b class="en">Silurian</b><i>443.8–419.2 Ma</i></span>
         </div>
-
-        <!-- Feature 3 -->
-        <div class="feature-card">
-            <div class="feature-icon">&#x2630;</div>
-            <h3 class="fr">Fiches de données taxinomiques</h3>
-            <h3 class="en">Taxonomic Data Sheets</h3>
-            <p class="fr">Chaque nœud possède une fiche dédiée permettant d'enregistrer des informations telles que la diagnose, le statut de menace UICN, la synonymie et la bibliographie.</p>
-            <p class="en">Each node has a dedicated data sheet to record information such as diagnosis, IUCN threat status, synonymy, and bibliography.</p>
+        <div class="strat__seg" style="--seg-c:#CB8C37; --seg-ink:#0E1512; flex-grow:60.3">
+          <span class="strat__abbr">D</span>
+          <span class="strat__pop"><b class="fr">Dévonien</b><b class="en">Devonian</b><i>419.2–358.9 Ma</i></span>
         </div>
-
-        <!-- Feature 4 -->
-        <div class="feature-card">
-            <div class="feature-icon">&#x2699;</div>
-            <h3 class="fr">Automatisation</h3>
-            <h3 class="en">Automation Features</h3>
-            <p class="fr">Le logiciel gère automatiquement le comptage des espèces, la mise en italique et le traitement des abréviations nomenclaturales (ex: X. xxx).</p>
-            <p class="en">The software automatically handles species counting, text italicization, and formatting of nomenclatural abbreviations (e.g., X. xxx).</p>
+        <div class="strat__seg" style="--seg-c:#67A599; --seg-ink:#0E1512; flex-grow:60">
+          <span class="strat__abbr">C</span>
+          <span class="strat__pop"><b class="fr">Carbonifère</b><b class="en">Carboniferous</b><i>358.9–298.9 Ma</i></span>
         </div>
-
-        <!-- Feature 5 -->
-        <div class="feature-card">
-            <div class="feature-icon">&#x231A;</div>
-            <h3 class="fr">Contexte géologique</h3>
-            <h3 class="en">Geological Context</h3>
-            <p class="fr">Intégration d'une échelle temporelle interactive couvrant du Précambrien à la période actuelle, qui s'ajuste dynamiquement aux dates de vos taxons.</p>
-            <p class="en">Integration of an interactive geological time scale ranging from the Precambrian to the present, dynamically adjusting to your taxa's dates.</p>
+        <div class="strat__seg" style="--seg-c:#F04028; --seg-ink:#0E1512; flex-grow:47">
+          <span class="strat__abbr">P</span>
+          <span class="strat__pop"><b class="fr">Permien</b><b class="en">Permian</b><i>298.9–251.9 Ma</i></span>
         </div>
-
-        <!-- Feature 6 -->
-        <div class="feature-card">
-            <div class="feature-icon">&#x2192;</div>
-            <h3 class="fr">Performances & Exportations</h3>
-            <h3 class="en">Performance & Export</h3>
-            <p class="fr">Optimisé pour les jeux de données massifs (arborescence multi-feuilles, import Xmind). Exportez en images haute résolution, CSV ou PDF incluant les fiches détaillées.</p>
-            <p class="en">Optimized for massive datasets (multi-sheet structures, Xmind import). Export to high-resolution images, CSV, or PDF including detailed sheets.</p>
+        <div class="strat__seg" style="--seg-c:#812B92; --seg-ink:#FFFFFF; flex-grow:50.5">
+          <span class="strat__abbr">T</span>
+          <span class="strat__pop"><b class="fr">Trias</b><b class="en">Triassic</b><i>251.9–201.4 Ma</i></span>
         </div>
+        <div class="strat__seg" style="--seg-c:#34B2C9; --seg-ink:#0E1512; flex-grow:56.4">
+          <span class="strat__abbr">J</span>
+          <span class="strat__pop"><b class="fr">Jurassique</b><b class="en">Jurassic</b><i>201.4–145 Ma</i></span>
+        </div>
+        <div class="strat__seg" style="--seg-c:#7FC64E; --seg-ink:#0E1512; flex-grow:79">
+          <span class="strat__abbr">K</span>
+          <span class="strat__pop"><b class="fr">Crétacé</b><b class="en">Cretaceous</b><i>145–66 Ma</i></span>
+        </div>
+        <div class="strat__seg" style="--seg-c:#FDA75F; --seg-ink:#0E1512; flex-grow:43">
+          <span class="strat__abbr">Pg</span>
+          <span class="strat__pop"><b class="fr">Paléogène</b><b class="en">Paleogene</b><i>66–23 Ma</i></span>
+        </div>
+        <div class="strat__seg" style="--seg-c:#FFE619; --seg-ink:#0E1512; flex-grow:20.42">
+          <span class="strat__abbr">Ng</span>
+          <span class="strat__pop"><b class="fr">Néogène</b><b class="en">Neogene</b><i>23–2.58 Ma</i></span>
+        </div>
+        <div class="strat__seg" style="--seg-c:#F9F97F; --seg-ink:#0E1512; flex-grow:2.58">
+          <span class="strat__abbr">Q</span>
+          <span class="strat__pop"><b class="fr">Quaternaire</b><b class="en">Quaternary</b><i>2.58–0 Ma</i></span>
+        </div>
+</div>
+<div class="strat__cap">
+  <span class="fr">Échelle des temps géologiques — survolez une période</span>
+  <span class="en">Geological time scale — hover a period</span>
+  <span>600 Ma → 0</span>
+</div>
 
-    </section>
+<!-- ========================= FIGURE 1 ========================== -->
+<section class="sec">
+  <div class="bleed rise">
+    <figure class="plate">
+      <img src="assets/brachiosauridae.jpeg" width="3200" height="874"
+           alt="Chronogramme des Brachiosauridae, du Jurassique au Crétacé supérieur">
+      <figcaption>
+        <b>Fig. 1</b>
+        <span class="fr">Brachiosauridae, mode chronogramme. Chaque taxon est calé sur l'échelle des temps ; les barres donnent l'intervalle d'existence attesté, les traits verticaux les divergences.</span>
+        <span class="en">Brachiosauridae, chronogram mode. Each taxon sits on the time scale; bars give the attested stratigraphic range, vertical lines the divergences.</span>
+      </figcaption>
+    </figure>
+  </div>
+</section>
 
-    <!-- FOOTER -->
-    <footer>
-        <p>&copy; 2026 CladisTree. <a href="#">GitHub Repository</a></p>
-    </footer>
+<!-- ========================== MODES ============================ -->
+<section class="sec sec--alt">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <p class="eyebrow fr">Mise en page</p>
+      <p class="eyebrow en">Layout</p>
+      <h2 class="fr">Trois façons de dessiner le même arbre</h2>
+      <h2 class="en">Three ways to draw the same tree</h2>
+      <p class="fr">La topologie ne change pas ; seule la lecture change. On bascule d'un mode à l'autre sans retoucher les données.</p>
+      <p class="en">The topology never changes, only the reading of it. Switch between modes without touching the data.</p>
+    </div>
 
-    <!-- JAVASCRIPT -->
-    <script>
-        function setLanguage(lang) {
-            document.documentElement.lang = lang;
-            localStorage.setItem('cladistree_web_lang', lang);
-            
-            // Mise à jour visuelle des boutons
-            document.getElementById('btn-fr').classList.remove('active');
-            document.getElementById('btn-en').classList.remove('active');
-            document.getElementById('btn-' + lang).classList.add('active');
-        }
+    <div class="modes">
+      <figure class="plate rise">
+        <div class="shot shot--cut">
+          <img src="assets/quetzalcoatlinae.jpeg" width="1100" height="1618" loading="lazy"
+               style="object-position:50% 0" alt="Cladogramme des Quetzalcoatlinae">
+        </div>
+        <div class="mode__body">
+          <span class="mode__tag fr">Cladogramme</span>
+          <span class="mode__tag en">Cladogram</span>
+          <h3 class="fr">Topologie seule</h3>
+          <h3 class="en">Topology only</h3>
+          <p class="fr">Branches d'égale longueur : seul l'ordre de ramification est représenté. C'est le mode standard.</p>
+          <p class="en">Branches of equal length: only the branching order is shown. This is the standard mode.</p>
+        </div>
+        <figcaption class="cap"><b>Fig. 2</b> <span class="taxon">Quetzalcoatlinae</span></figcaption>
+      </figure>
 
-        window.onload = () => {
-            const savedLang = localStorage.getItem('cladistree_web_lang');
-            if (savedLang) {
-                setLanguage(savedLang);
-            } else {
-                const userLang = navigator.language || navigator.userLanguage;
-                if (userLang.startsWith('fr')) {
-                    setLanguage('fr');
-                } else {
-                    setLanguage('en');
-                }
-            }
-        };
-    </script>
+      <figure class="plate rise">
+        <div class="shot shot--cut">
+          <img src="assets/exemple-pheno.jpeg" width="1100" height="2395" loading="lazy"
+               style="object-position:50% 12%" alt="Phénogramme des Cetacea, avec cadres colorés par groupe">
+        </div>
+        <div class="mode__body">
+          <span class="mode__tag fr">Phénogramme</span>
+          <span class="mode__tag en">Phenogram</span>
+          <h3 class="fr">Disposition en peigne</h3>
+          <h3 class="en">Comb layout</h3>
+          <p class="fr">Pour les longues séries de taxons : les feuilles s'alignent, les cadres regroupent les clades.</p>
+          <p class="en">For long series of taxa: leaves line up and frames group the clades.</p>
+        </div>
+        <figcaption class="cap"><b>Fig. 3</b> <span class="taxon">Cetacea</span> <span class="fr">(vue partielle)</span><span class="en">(partial view)</span></figcaption>
+      </figure>
+
+      <figure class="plate rise">
+        <div class="shot"><img src="assets/brachiosauridae.jpeg" width="3200" height="874" loading="lazy"
+             style="object-position:78% 100%"
+             alt="Détail d'un chronogramme et de sa frise stratigraphique"></div>
+        <div class="mode__body">
+          <span class="mode__tag fr">Chronogramme</span>
+          <span class="mode__tag en">Chronogram</span>
+          <h3 class="fr">Calé sur le temps</h3>
+          <h3 class="en">Anchored in time</h3>
+          <p class="fr">Les branches suivent les dates saisies. Datez la racine d'une famille : les divergences intermédiaires se répartissent seules.</p>
+          <p class="en">Branches follow the dates you enter. Date the root of a family and the intermediate divergences space themselves out.</p>
+        </div>
+        <figcaption class="cap"><b>Fig. 1</b> <span class="fr">détail</span><span class="en">detail</span></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ======================== INTERFACE ========================== -->
+<section class="sec">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <p class="eyebrow fr">Interface</p>
+      <p class="eyebrow en">Interface</p>
+      <h2 class="fr">Un arbre à gauche, la fiche du taxon à droite</h2>
+      <h2 class="en">The tree on the left, the taxon record on the right</h2>
+      <p class="fr">Les feuilles en bas de fenêtre découpent un grand arbre en sous-ensembles autonomes, sans jamais rompre la hiérarchie.</p>
+      <p class="en">The sheet tabs at the bottom split a large tree into self-contained subsets without ever breaking the hierarchy.</p>
+    </div>
+    <figure class="plate rise">
+      <img src="assets/exemple-ui.png" width="1920" height="1080" loading="lazy"
+           alt="Interface de CladisTree : arbre des Paleoanguimorpha et fiche de Shinisaurus crocodilurus">
+      <figcaption>
+        <b>Fig. 4</b>
+        <span class="fr">Arbre des <span class="taxon">Paleoanguimorpha</span>, fiche de <span class="taxon">Shinisaurus crocodilurus</span> ouverte. Thème InGen.</span>
+        <span class="en">The <span class="taxon">Paleoanguimorpha</span> tree with the <span class="taxon">Shinisaurus crocodilurus</span> record open. InGen theme.</span>
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ========================== FICHES =========================== -->
+<section class="sec sec--alt">
+  <div class="wrap split split--sheet">
+    <figure class="plate rise">
+      <img src="assets/fiche-crocodilurus.jpg" width="900" height="1273" loading="lazy"
+           alt="Fiche PDF exportée pour Shinisaurus crocodilurus">
+      <figcaption class="cap">
+        <b>Fig. 5</b>
+        <span class="fr">Fiche exportée en PDF</span>
+        <span class="en">Record exported to PDF</span>
+      </figcaption>
+    </figure>
+    <div class="rise">
+      <p class="eyebrow fr">Données</p>
+      <p class="eyebrow en">Data</p>
+      <h3 class="fr">Chaque nœud porte sa documentation</h3>
+      <h3 class="en">Every node carries its own documentation</h3>
+      <p class="fr">Une fiche par taxon, remplie au fil du travail. Les nœuds documentés se repèrent d'un coup d'œil dans l'arbre. Le tout se compile en tableau, s'exporte en CSV, ou en fiche PDF illustrée avec le lignage complet et la période colorée.</p>
+      <p class="en">One record per taxon, filled in as you go. Documented nodes are visible at a glance in the tree. Everything compiles into a table, exports to CSV, or to an illustrated PDF sheet with the full lineage and the coloured period band.</p>
+      <ul class="fields">
+        <li class="fr">Statut</li><li class="en">Status</li>
+        <li class="fr">Rang</li><li class="en">Rank</li>
+        <li class="fr">Auteur et date</li><li class="en">Author, year</li>
+        <li class="fr">Répartition</li><li class="en">Distribution</li>
+        <li class="fr">Taille</li><li class="en">Size</li>
+        <li class="fr">Masse</li><li class="en">Mass</li>
+        <li class="fr">Période</li><li class="en">Period</li>
+        <li class="fr">Diagnose</li><li class="en">Diagnosis</li>
+        <li class="fr">Synapomorphies</li><li class="en">Synapomorphies</li>
+        <li>UICN / IUCN</li>
+        <li class="fr">Synonymie</li><li class="en">Synonymy</li>
+        <li class="fr">Bibliographie</li><li class="en">Bibliography</li>
+      </ul>
+      <a class="linkline" href="assets/fiche-crocodilurus.pdf">
+        <span class="fr">↓ Voir la fiche complète (PDF)</span>
+        <span class="en">↓ See the full record (PDF)</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= CAPACITÉS ========================= -->
+<section class="sec">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <p class="eyebrow fr">Ce que fait le logiciel</p>
+      <p class="eyebrow en">What the software does</p>
+      <h2 class="fr">Le reste du travail</h2>
+      <h2 class="en">The rest of the work</h2>
+    </div>
+    <div class="caps rise">
+      <div>
+        <span class="k fr">Nomenclature</span><span class="k en">Nomenclature</span>
+        <h3 class="fr">Écriture automatique</h3>
+        <h3 class="en">Automatic formatting</h3>
+        <p class="fr">Italiques, abréviation du genre (<span class="taxon">T. rex</span>), croix des taxons éteints, comptage des espèces : appliqués sans intervention.</p>
+        <p class="en">Italics, genus abbreviation (<span class="taxon">T. rex</span>), the dagger on extinct taxa, species counts — all applied for you.</p>
+      </div>
+      <div>
+        <span class="k fr">Groupes</span><span class="k en">Groups</span>
+        <h3 class="fr">Cadres dynamiques</h3>
+        <h3 class="en">Dynamic frames</h3>
+        <p class="fr">Monophylétiques ou paraphylétiques. Ils s'ajustent d'eux-mêmes et englobent les taxons ajoutés à l'intérieur.</p>
+        <p class="en">Monophyletic or paraphyletic. They resize on their own and take in any taxon added inside them.</p>
+      </div>
+      <div>
+        <span class="k fr">Grands arbres</span><span class="k en">Large trees</span>
+        <h3 class="fr">Feuilles multiples</h3>
+        <h3 class="en">Multiple sheets</h3>
+        <p class="fr">Un clade devient une feuille à part, navigable par un fil d'Ariane, sans casser la hiérarchie d'ensemble.</p>
+        <p class="en">A clade becomes its own sheet, reachable through a breadcrumb, without breaking the overall hierarchy.</p>
+      </div>
+      <div>
+        <span class="k fr">Entrée</span><span class="k en">Input</span>
+        <h3 class="fr">Import Xmind</h3>
+        <h3 class="en">Xmind import</h3>
+        <p class="fr">Reprenez une arborescence existante au lieu de la ressaisir. Glissez le fichier dans la fenêtre.</p>
+        <p class="en">Bring in an existing outline instead of retyping it. Drop the file onto the window.</p>
+      </div>
+      <div>
+        <span class="k fr">Apparence</span><span class="k en">Appearance</span>
+        <h3 class="fr">Thèmes et styles</h3>
+        <h3 class="en">Themes and styles</h3>
+        <p class="fr">Clair, sombre, sépia, InGen. Police, corps, couleur et pictogramme réglables nœud par nœud.</p>
+        <p class="en">Light, dark, sepia, InGen. Font, size, colour and icon adjustable node by node.</p>
+      </div>
+      <div>
+        <span class="k fr">Sortie</span><span class="k en">Output</span>
+        <h3 class="fr">Export</h3>
+        <h3 class="en">Export</h3>
+        <p class="fr">PNG et SVG jusqu'à la résolution d'impression, PDF avec les fiches, CSV pour le tableur.</p>
+        <p class="en">PNG and SVG up to print resolution, PDF with the records, CSV for spreadsheets.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= TÉLÉCHARGER ========================= -->
+<section class="sec sec--alt end">
+  <div class="wrap">
+    <h2 class="fr">Télécharger CladisTree</h2>
+    <h2 class="en">Download CladisTree</h2>
+    <!-- ▸ Remplacez les # par les liens de vos releases GitHub. -->
+    <div class="dl">
+      <a href="#"><span>↓</span> Windows <span>.exe</span></a>
+      <a href="#"><span>↓</span> macOS <span>.dmg</span></a>
+      <a href="#"><span>↓</span> Linux <span>.AppImage</span></a>
+    </div>
+    <p class="dl__note fr">Version 1.3.1 · gratuit et open source</p>
+    <p class="dl__note en">Version 1.3.1 · free and open source</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <span>© 2026 CladisTree — Nassim Ennasri</span>
+    <span><a href="#">GitHub</a></span>
+  </div>
+</footer>
+
+<script>
+/* --- bascule de langue ---------------------------------------- */
+function setLanguage(lang){
+  document.documentElement.lang = lang;
+  localStorage.setItem('cladistree_web_lang', lang);
+  document.getElementById('btn-fr').setAttribute('aria-pressed', lang === 'fr');
+  document.getElementById('btn-en').setAttribute('aria-pressed', lang === 'en');
+}
+setLanguage(document.documentElement.lang);
+
+/* --- écho de la frise sous la barre de navigation -------------- */
+(function(){
+  var host = document.getElementById('nav-strat');
+  document.querySelectorAll('#strat .strat__seg').forEach(function(seg){
+    var i = document.createElement('i');
+    i.style.background = getComputedStyle(seg).getPropertyValue('--seg-c');
+    i.style.flexGrow = seg.style.flexGrow;
+    host.appendChild(i);
+  });
+})();
+
+/* --- révélation au défilement ---------------------------------- */
+(function(){
+  var items = document.querySelectorAll('.rise');
+  if (!('IntersectionObserver' in window) ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    items.forEach(function(el){ el.classList.add('seen'); });
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting){ e.target.classList.add('seen'); io.unobserve(e.target); }
+    });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+  items.forEach(function(el){ io.observe(el); });
+})();
+</script>
 </body>
 </html>
