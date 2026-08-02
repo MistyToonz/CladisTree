@@ -267,6 +267,18 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
 .copy:hover{background:transparent;color:var(--ink)}
 .copy[data-done="1"]{background:#2E7D32;border-color:#2E7D32;color:#fff}
 
+/* ------------------------- contact -------------------------- */
+.mailbox{
+  background:var(--card);border:1px solid var(--rule);border-radius:5px;
+  padding:22px 24px;margin-top:22px;text-align:center;
+}
+.mailbox a{
+  font-family:var(--mono);font-size:clamp(15px,2.2vw,19px);color:var(--blue);
+  text-decoration:none;border-bottom:1px solid rgba(0,74,173,.3);
+  padding-bottom:3px;transition:.15s;word-break:break-all;
+}
+.mailbox a:hover{border-color:var(--blue)}
+
 /* ------------- fenêtre d'aide au premier lancement ---------- */
 .sheet{
   position:fixed;inset:0;z-index:200;display:none;
@@ -330,6 +342,7 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
     <div class="navlinks">
       <a href="#modes"><span class="fr">Aperçu</span><span class="en">Overview</span></a>
       <a href="#credit"><span class="fr">Créditer</span><span class="en">Credit</span></a>
+      <a href="#contact"><span class="fr">Contact</span><span class="en">Contact</span></a>
       <a href="#download"><span class="fr">Télécharger</span><span class="en">Download</span></a>
     </div>
     <div class="langs" role="group" aria-label="Langue / Language">
@@ -659,6 +672,28 @@ footer{border-top:1px solid var(--rule);padding:26px 0 40px}
 
     <p class="dl__note fr" style="margin-top:16px;">Aucune obligation : la licence MIT n'exige rien de tel. C'est une demande, pas une condition.</p>
     <p class="dl__note en" style="margin-top:16px;">Not a requirement: the MIT licence asks for nothing of the sort. This is a request, not a condition.</p>
+  </div>
+</section>
+
+<!-- ========================== CONTACT ========================== -->
+<section class="sec sec--alt" id="contact">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <p class="eyebrow fr">Contact</p>
+      <p class="eyebrow en">Contact</p>
+      <h2 class="fr">Une question, un retour</h2>
+      <h2 class="en">A question, some feedback</h2>
+      <p class="fr">Pour une suggestion, une question d'utilisation, ou simplement pour montrer une figure produite avec l'outil, écrivez-moi directement.</p>
+      <p class="en">For a suggestion, a question about using the tool, or simply to show a figure you produced with it, write to me directly.</p>
+    </div>
+
+    <div class="mailbox rise">
+      <!-- ▸ ADRESSE À RENSEIGNER : remplacer les deux occurrences sur la ligne ci-dessous. -->
+      <a href="nassim.ennasri@gmail.com">nassim.ennasri@gmail.com</a>
+    </div>
+
+    <p class="dl__note fr" style="margin-top:16px; text-align:center;">Pour signaler un bogue, les <a href="https://github.com/MistyToonz/CladisTree/issues" style="color:var(--blue);">issues GitHub</a> sont préférables : le problème reste visible et profite aux autres utilisateurs.</p>
+    <p class="dl__note en" style="margin-top:16px; text-align:center;">To report a bug, <a href="https://github.com/MistyToonz/CladisTree/issues" style="color:var(--blue);">GitHub issues</a> work better: the problem stays visible and benefits other users.</p>
   </div>
 </section>
 
