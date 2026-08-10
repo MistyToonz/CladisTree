@@ -19,11 +19,14 @@ jobs:
       - name: Installation des dependances
         run: npm install
 
-      - name: Compilation de l'application
-        run: npm run make
+      - name: Compilation Apple Silicon (Puces M)
+        run: npm run make -- --platform=darwin --arch=arm64
 
-      - name: Sauvegarde du fichier genere
+      - name: Compilation Intel (Anciens Mac)
+        run: npm run make -- --platform=darwin --arch=x64
+
+      - name: Sauvegarde des fichiers generes
         uses: actions/upload-artifact@v4
         with:
-          name: CladisTree-macOS
+          name: CladisTree-macOS-Complet
           path: out/make/**/*.zip
