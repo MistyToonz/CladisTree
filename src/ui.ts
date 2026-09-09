@@ -247,6 +247,19 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                 </label>
             </div>
             <div class="settings-row">
+                <span id="lbl-settings-wallpaper">Fond d'écran</span>
+                <div style="display:flex; flex-direction:column; gap:5px; align-items:flex-end;">
+                    <div style="display:flex; gap:5px; align-items:center;">
+                        <input type="file" id="set-wallpaper-file" accept="image/png, image/jpeg, image/webp" style="display:none;">
+                        <button id="btn-upload-wallpaper" style="padding:4px 8px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:3px;">Choisir...</button>
+                        <button id="btn-clear-wallpaper" style="padding:4px 8px; cursor:pointer; background:var(--bg-input); color:#d32f2f; border:1px solid #d32f2f; border-radius:3px; display:none;">X</button>
+                    </div>
+                    <div id="container-wallpaper-opacity" style="display:none; align-items:center; gap:5px; font-size:10px;">
+                        Opacité: <input type="range" id="set-wallpaper-opacity" min="5" max="100" value="100" style="width:80px;">
+                    </div>
+                </div>
+            </div>
+            <div class="settings-row">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                     <input type="checkbox" id="set-auto-update"> <span id="lbl-settings-autoupdate">${t('settings.auto_update')}</span>
                 </label>
@@ -554,7 +567,7 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       btnExportFiche: document.getElementById('btn-export-fiche') as HTMLButtonElement,
       btnClosePanel: document.getElementById('btn-close-panel') as HTMLButtonElement,
       btnNew: document.getElementById('btn-new') as HTMLElement,
-      btnNewWindow: document.getElementById('btn-new-window') as HTMLElement, // Ligne à ajouter
+      btnNewWindow: document.getElementById('btn-new-window') as HTMLElement, 
       styleBoxShape: document.getElementById('style-box-shape') as HTMLSelectElement,
       styleBoxVertical: document.getElementById('style-box-vertical') as HTMLInputElement,
       styleBoxGradient: document.getElementById('style-box-gradient') as HTMLInputElement,
@@ -578,6 +591,11 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       btnToggleRibbon: document.getElementById('btn-toggle-ribbon') as HTMLButtonElement,
       btnToggleAbbrev: document.getElementById('btn-toggle-abbrev') as HTMLButtonElement,
       setCountInvalid: document.getElementById('set-count-invalid') as HTMLInputElement,
+      setWallpaperFile: document.getElementById('set-wallpaper-file') as HTMLInputElement,
+      btnUploadWallpaper: document.getElementById('btn-upload-wallpaper') as HTMLButtonElement,
+      btnClearWallpaper: document.getElementById('btn-clear-wallpaper') as HTMLButtonElement,
+      setWallpaperOpacity: document.getElementById('set-wallpaper-opacity') as HTMLInputElement, 
+      containerWallpaperOpacity: document.getElementById('container-wallpaper-opacity') as HTMLElement, 
       panelSubtitleSynonym: document.getElementById('panel-subtitle-synonym') as HTMLElement,
       inpSynonymTarget: document.getElementById('inp-synonymTarget') as HTMLInputElement,
       synonymDropdown: document.getElementById('synonym-dropdown') as HTMLElement,

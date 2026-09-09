@@ -335,6 +335,25 @@ export const translations: Record<Lang, Record<string, string>> = {
     'geo.pridoli': 'Pridolien', 'geo.ludfordian': 'Ludfordien', 'geo.gorstian': 'Gorstien', 'geo.homerian': 'Homérien', 'geo.sheinwoodian': 'Sheinwoodien', 'geo.telychian': 'Télychien', 'geo.aeronian': 'Aéronien', 'geo.rhuddanian': 'Rhuddanien',
     'geo.hirnantian': 'Hirnantien', 'geo.katian': 'Katien', 'geo.sandbian': 'Sandbien', 'geo.darriwilian': 'Darriwilien', 'geo.dapingian': 'Dapingien', 'geo.floian': 'Floien', 'geo.tremadocian': 'Trémadocien',
     'geo.stage10': 'Étage 10', 'geo.jiangshanian': 'Jiangshanien', 'geo.paibian': 'Paibien', 'geo.guzhangian': 'Guzhangien', 'geo.drumian': 'Drumien', 'geo.wuliuan': 'Wuliuen', 'geo.stage4': 'Étage 4', 'geo.stage3': 'Étage 3', 'geo.stage2': 'Étage 2', 'geo.fortunian': 'Fortunien',
+
+    'default.box': 'Cadre',
+    'default.para_group': 'Groupe Paraphylétique',
+    'default.mono_clade': 'Clade Monophylétique',
+    'default.clade_prefix': 'Clade ',
+    'alert.save_success': 'Fichier sauvegardé avec succès dans :\n',
+    'alert.wallpaper_too_large': '⚠ Impossible de sauvegarder les paramètres. L\'image de fond d\'écran est probablement trop lourde (limite de ~5 Mo). Veuillez en choisir une plus compressée.',
+    'alert.file_read_error': 'Erreur de lecture du fichier : ',
+    'alert.link_broken1': 'Le fichier "',
+    'alert.link_broken2': '" a été déplacé ou est introuvable.\nVeuillez le localiser manuellement pour réparer le lien.',
+    'alert.action_impossible': 'Action impossible',
+    'alert.paradox_parent1': 'Le parent est apparu il y a <b>',
+    'alert.paradox_parent2': ' Ma</b>.<br>Vous ne pouvez pas placer son descendant avant lui (',
+    'alert.paradox_child1': 'Le descendant est apparu il y a <b>',
+    'alert.paradox_child2': ' Ma</b>.<br>Vous ne pouvez pas placer son ancêtre après lui (',
+    'alert.xmind_labels': 'Étiquettes XMind : ',
+    'alert.chrono_img_error': 'Il est impossible d\'ajouter une image sur un taxon intermédiaire en mode chronogramme. Seuls les taxons terminaux peuvent être illustrés dans ce mode afin de préserver l\'intégrité de l\'échelle temporelle.',
+    'style.img_loaded': '✔ Image chargée',
+    'style.img_file_prefix': '▣ '
   },
   en: {
     'btn.shortcuts': '⌨ Shortcuts',
@@ -670,6 +689,25 @@ export const translations: Record<Lang, Record<string, string>> = {
     'geo.pridoli': 'Pridoli', 'geo.ludfordian': 'Ludfordian', 'geo.gorstian': 'Gorstian', 'geo.homerian': 'Homerian', 'geo.sheinwoodian': 'Sheinwoodian', 'geo.telychian': 'Telychian', 'geo.aeronian': 'Aeronian', 'geo.rhuddanian': 'Rhuddanian',
     'geo.hirnantian': 'Hirnantian', 'geo.katian': 'Katian', 'geo.sandbian': 'Sandbian', 'geo.darriwilian': 'Darriwilian', 'geo.dapingian': 'Dapingian', 'geo.floian': 'Floian', 'geo.tremadocian': 'Tremadocian',
     'geo.stage10': 'Stage 10', 'geo.jiangshanian': 'Jiangshanian', 'geo.paibian': 'Paibian', 'geo.guzhangian': 'Guzhangian', 'geo.drumian': 'Drumian', 'geo.wuliuan': 'Wuliuan', 'geo.stage4': 'Stage 4', 'geo.stage3': 'Stage 3', 'geo.stage2': 'Stage 2', 'geo.fortunian': 'Fortunian',
+
+    'default.box': 'Frame',
+    'default.para_group': 'Paraphyletic Group',
+    'default.mono_clade': 'Monophyletic Clade',
+    'default.clade_prefix': 'Clade ',
+    'alert.save_success': 'File successfully saved to:\n',
+    'alert.wallpaper_too_large': '⚠ Failed to save settings. The wallpaper image is likely too large (~5 MB limit). Please choose a more compressed one.',
+    'alert.file_read_error': 'Error reading file: ',
+    'alert.link_broken1': 'The file "',
+    'alert.link_broken2': '" was moved or is missing.\nPlease locate it manually to repair the link.',
+    'alert.action_impossible': 'Action impossible',
+    'alert.paradox_parent1': 'The parent appeared <b>',
+    'alert.paradox_parent2': ' Ma</b> ago.<br>You cannot place its descendant before it (',
+    'alert.paradox_child1': 'The descendant appeared <b>',
+    'alert.paradox_child2': ' Ma</b> ago.<br>You cannot place its ancestor after it (',
+    'alert.xmind_labels': 'XMind Labels: ',
+    'alert.chrono_img_error': 'Images cannot be added to intermediate taxa in chronogram mode. Only terminal taxa can be illustrated to preserve the integrity of the time scale.',
+    'style.img_loaded': '✔ Image loaded',
+    'style.img_file_prefix': '▣ '
   }
 };
 
