@@ -1,3 +1,4 @@
+// ui.ts
 import { APP_CSS, getWelcomeHTML, CREDITS_HTML, CONTEXT_MENU_HTML, COMPILE_MODAL_HTML, TABLE_MODAL_HTML, TAXONOMIC_RANKS, GEOLOGICAL_PERIODS } from './utils';
 import { t, currentLang } from './i18n';
 
@@ -111,8 +112,6 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                 </button>
             </div>
 
-            <!-- Controles specifiques au chronogramme (phases 8 et 9).
-                 Masque par defaut : updateLayoutButtonsUI() l'affiche en mode chrono. -->
             <div id="chrono-tools" style="display:none; align-items:center; gap:6px; margin-left:10px;">
                 <select id="chrono-axis-select" title="${t('chrono.axis.title')}" style="padding:3px 6px; font-size:12px; border-radius:3px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input); cursor:pointer;">
                     <option value="linear">${t('chrono.axis.linear')}</option>
@@ -282,6 +281,11 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
             </div>
             <div class="settings-row">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" id="set-auto-genus-species"> <span id="lbl-settings-autogenusspecies">${t('settings.auto_genus_species')}</span>
+                </label>
+            </div>
+            <div class="settings-row">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                     <input type="checkbox" id="set-auto-italic"> <span id="lbl-settings-autoitalic">${t('settings.auto_italic')}</span>
                 </label>
             </div>
@@ -374,11 +378,9 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
         </div>
         
         <div style="margin-bottom:15px; display:flex; flex-direction:column; gap:2px;">
-            <!-- Frise globale d'origine -->
             <div id="timeline-container" style="width:100%; height:20px; background:var(--bg-hover); position:relative; border:1px solid var(--border-color); box-sizing:border-box; overflow:hidden;">
                 <div id="timeline-indicator" style="position:absolute; top:-2px; bottom:-2px; background:rgba(255, 0, 0, 0.5); border-left:2px solid red; border-right:2px solid red; z-index:10; display:none; pointer-events:none; box-sizing:border-box;"></div>
             </div>
-            <!-- Nouvelle Frise Zoom -->
             <div id="timeline-zoom-container" style="width:100%; height:18px; background:var(--bg-panel); position:relative; border:1px solid var(--border-color); box-sizing:border-box; overflow:hidden; display:none;">
                 <div id="timeline-zoom-content" style="position:absolute; top:0; left:0; width:100%; height:100%; display:flex;"></div>
                 <div id="timeline-zoom-indicator" style="position:absolute; top:-2px; bottom:-2px; background:rgba(255, 0, 0, 0.5); border-left:2px solid red; border-right:2px solid red; z-index:10; display:none; pointer-events:none; box-sizing:border-box;"></div>
@@ -457,10 +459,8 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
 
   document.body.insertAdjacentHTML('beforeend', uiHTML);
 
-  // On importe les éons en haut de ui.ts si nécessaire, ou on y accède directement via utils
   const timelineContainer = document.getElementById('timeline-container');
   if (timelineContainer) {
-      // Nettoyage initial pour éviter les doublons au re-render
       timelineContainer.innerHTML = `
         <div id="timeline-indicator" style="position:absolute; top:-2px; bottom:-2px; background:rgba(255, 0, 0, 0.5); border-left:2px solid red; border-right:2px solid red; z-index:10; display:none; pointer-events:none; box-sizing:border-box;"></div>
         <div id="timeline-layer-normal" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
@@ -470,7 +470,6 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       const layerNormal = document.getElementById('timeline-layer-normal');
       const layerDeep = document.getElementById('timeline-layer-deep');
 
-      // 1. Génération de la frise classique (0 - 600 Ma)
       GEOLOGICAL_PERIODS.forEach(p => { 
           const pctWidth = ((p.start - p.end) / 600) * 100; 
           const pctLeft = ((600 - p.start) / 600) * 100; 
@@ -480,8 +479,7 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
           layerNormal?.appendChild(block); 
       });
 
-      // 2. Génération de la frise Précambrien profond (0 - 4500 Ma)
-      const { PRECAMBRIAN_EONS } = require('./utils'); // Récupération sécurisée de la constante
+      const { PRECAMBRIAN_EONS } = require('./utils'); 
       PRECAMBRIAN_EONS.forEach((e: any) => {
           const pctWidth = ((e.start - e.end) / 4500) * 100;
           const pctLeft = ((4500 - e.start) / 4500) * 100;
@@ -581,6 +579,7 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       btnCheckUpdate: document.getElementById('btn-check-update') as HTMLElement,
       setLayout: document.getElementById('set-layout') as HTMLSelectElement,
       setSmartTax: document.getElementById('set-smart-tax') as HTMLInputElement,
+      setAutoGenusSpecies: document.getElementById('set-auto-genus-species') as HTMLInputElement,
       setAutoItalic: document.getElementById('set-auto-italic') as HTMLInputElement,
       setZoomSens: document.getElementById('set-zoom-sens') as HTMLInputElement,
       setFicheColor: document.getElementById('set-fiche-color') as HTMLInputElement,
@@ -723,6 +722,7 @@ export const updateAllUITexts = (ui: any) => {
     el('btn-clear-history', t('settings.clear_history'));
     el('btn-reset-settings', t('settings.reset_settings'));
     el('lbl-settings-fiche-indicator', t('settings.fiche_indicator'));
+    el('lbl-settings-autogenusspecies', t('settings.auto_genus_species') !== 'settings.auto_genus_species' ? t('settings.auto_genus_species') : 'Auto Genre/Espèce');
     
     // Select options : on force le re-render des options pour la traduction
     if(ui.setTheme) {

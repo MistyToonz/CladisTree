@@ -25,19 +25,19 @@ export const translations: Record<Lang, Record<string, string>> = {
     'patch.version': 'Version',
     'patch.title': 'Notes de Mise à Jour',
     'patch.cat1.title': "◆ Nouveautés Majeures & Système",
-    'patch.cat1.list': "<li><b>Fond d'écran :</b> ajout d'une option esthétique pour définir une image de fond personnalisée, sauvegardée localement dans le logiciel (n'affecte pas les exports).</li><li><b>Paramètres globaux :</b> les réglages sont désormais liés au logiciel de manière permanente et non plus au fichier en cours.</li><li><b>Ouverture native :</b> double-cliquer sur un fichier .phylo depuis le système d'exploitation charge désormais correctement l'arbre au lieu d'ouvrir une instance vide.</li><li><b>Architecture :</b> restructuration majeure du code en sous-fichiers pour de meilleures performances et une maintenance facilitée.</li>",
+    'patch.cat1.list': "<li><b>Raccourci Alt + S :</b> permet désormais d'assigner automatiquement le rang Espèce au taxon sélectionné et Genre à son premier parent nommé, de manière réversible.</li><li><b>Moteur de rendu :</b> la géométrie des branches est désormais verrouillée et stricte, offrant un alignement mathématique parfait sans distorsions visuelles.</li>",
     
     'patch.cat2.title': "▶ Thèmes, Styles & Rendu Visuel",
-    'patch.cat2.list': "<li><b>Refonte des Phénogrammes :</b> l'espacement est calculé de manière proportionnelle pour chaque sous-groupe indépendamment, évitant les marges excessives.</li><li><b>Rendu Chronogramme :</b> correction des lignes et des fonds qui passaient par-dessus les taxons.</li><li><b>Frise dynamique :</b> forçage des abréviations sur les étages géologiques trop serrés, ou masquage automatique si l'espace est insuffisant.</li><li><b>Cadres adaptatifs :</b> les boîtes de sélection englobent désormais correctement les images.</li>",
+    'patch.cat2.list': "<li><b>Sélection visible :</b> les nœuds vides non nommés s'allument désormais en bleu lors de leur sélection pour faciliter la navigation à l'aveugle.</li><li><b>Chronogramme (Noms) :</b> les noms des espèces sont désormais forcés au format complet (Xxx xxx) pour garantir la stabilité de l'échelle, et les genres intermédiaires sont masqués.</li>",
     
     'patch.cat3.title': "☑ Ergonomie & Navigation",
-    'patch.cat3.list': "<li><b>Saisie fluide :</b> les champs de dates et d'images ne déclenchent la sauvegarde qu'une fois l'édition terminée, supprimant les ralentissements en cours de frappe.</li><li><b>Sélection :</b> résolution des conflits de sélection et d'affichage de boîtes multiples lors de l'utilisation du menu des styles.</li><li><b>Édition de la racine :</b> le double-clic pour renommer le taxon racine fonctionne de nouveau correctement.</li>",
+    'patch.cat3.list': "<li><b>Tri automatique :</b> ajout d'une option dans les paramètres pour activer ou désactiver la détection intelligente des genres et espèces.</li><li><b>Caméra unifiée :</b> suppression des bugs de rebond et de double-animation lors des changements de mode de vue.</li>",
     
-    'patch.cat4.title': "▤ Fiches Taxons & Exports",
-    'patch.cat4.list': "<li><b>Exports PDF traduits :</b> les fiches PDF (titres, champs, UI) sont désormais générées dans la langue active du logiciel.</li><li><b>Dates exportées :</b> amélioration du placement des dates sur les exports d'images pour éviter tout chevauchement inesthétique avec les illustrations.</li>",
+    'patch.cat4.title': "▤ Chronogramme",
+    'patch.cat4.list': "<li><b>Positionnement des textes :</b> les noms des clades intermédiaires lévitent désormais parfaitement au-dessus des intersections, sans chevaucher les lignes.</li><li><b>Texte intelligent :</b> si un nom de clade est plus long que sa branche, il bascule automatiquement en amont de son point de divergence pour ne percuter aucune autre ligne.</li>",
     
     'patch.cat5.title': "⚠ Optimisations & Corrections",
-    'patch.cat5.list': "<li><b>Logique d'abréviation :</b> correction du bug où une espèce héritait de l'initiale de sa famille s'ils partageaient la même première lettre (ex: <i>Centrosaurus aparatus</i> ne devient plus <i>C. Centrosaurus aparatus</i> sous <i>Centrosaurinae</i>).</li><li><b>Chronogramme :</b> verrouillage strict de la racine pour empêcher son déplacement manuel qui faussait l'échelle.</li><li><b>Correction d'images :</b> résolution des bugs de disparition d'images en mode chronogramme.</li>",
+    'patch.cat5.list': "<li><b>Compacteur de noms :</b> l'algorithme est devenu beaucoup plus strict et n'affecte désormais plus que les taxons explicitement classés comme espèces ou sous-espèces.</li><li><b>Obèles (†) :</b> correction d'un bug d'affichage où la croix d'extinction pouvait mal s'insérer sur les noms intermédiaires.</li><li><b>Lignes tordues :</b> éradication définitive des diagonales et des lignes qui contournaient les cadres de texte par le haut ou le bas.</li>",
 
     // Menu Contextuel
     'menu.edit': '✎ Éditer la fiche',
@@ -327,7 +327,7 @@ export const translations: Record<Lang, Record<string, string>> = {
     'topbar.btn.format.compact': 'Noms compacts',
 
     // --- ÉCHELLE STRATIGRAPHIQUE ---
-    'geo.holocene': 'Holocène', 'geo.tarantian': 'Tarentien', 'geo.chibanian': 'Chibanien', 'geo.calabrian': 'Calabrien', 'geo.gelasian': 'Gélasien',
+    'geo.holocene': 'Holocène', 'geo.tarantian': 'Tarentien', 'geo.chibanian': 'Chibanien', 'geo.calabrian': 'Calabrian', 'geo.gelasian': 'Gélasien',
     'geo.piacenzian': 'Plaisancien', 'geo.zanclean': 'Zancléen', 'geo.messinian': 'Messinien', 'geo.tortonian': 'Tortonien', 'geo.serravallian': 'Serravallien', 'geo.langhian': 'Langhien', 'geo.burdigalian': 'Burdigalien', 'geo.aquitanian': 'Aquitanien',
     'geo.chattian': 'Chattian', 'geo.rupelian': 'Rupélien', 'geo.priabonian': 'Priabonien', 'geo.bartonian': 'Bartonien', 'geo.lutetian': 'Lutétien', 'geo.ypresian': 'Yprésien', 'geo.thanetian': 'Thanétien', 'geo.selandian': 'Sélandien', 'geo.danian': 'Danien',
     'geo.maastrichtian': 'Maastrichtien', 'geo.campanian': 'Campanien', 'geo.santonian': 'Santonien', 'geo.coniacian': 'Coniacien', 'geo.turonian': 'Turonien', 'geo.cenomanian': 'Cénomanien', 'geo.albian': 'Albien', 'geo.aptian': 'Aptien', 'geo.barremian': 'Barrémien', 'geo.hauterivian': 'Hauterivien', 'geo.valanginian': 'Valanginien', 'geo.berriasian': 'Berriasien',
