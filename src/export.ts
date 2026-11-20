@@ -1,8 +1,8 @@
 import { zipSync, strToU8 } from 'fflate';
 import { jsPDF } from 'jspdf';
-import { t, currentLang } from './i18n';
-// @ts-ignore
-import { PRECAMBRIAN_EONS } from './utils';
+import { t, currentLang, colonSep } from './i18n';
+import { resolveAsset } from './asset-store';
+import { PRECAMBRIAN_EONS, GEOLOGICAL_PERIODS, PHANEROZOIC_BASE, PHANEROZOIC_TIMELINE_MAX, EARTH_AGE, stagesOf, GeoPeriod } from './chrono-data';
 
 // ==========================================
 // 1. EXPORT EXCEL (.xlsx)
@@ -101,7 +101,7 @@ export const exportGraphToPdf = (b64Image: string, fileName: string, electronAPI
 // ==========================================
 // 3. EXPORT FICHE TAXON EN PDF
 // ==========================================
-export const generateFichePdf = async (d: any, settings: any, lineageStr: string, synNameStr: string, geoDetails: any[], electronAPI: any) => {
+export const generateFichePdf = async (d: any, settings: any, lineageStr: string, synNameStr: string, geoDetails: GeoPeriod[], electronAPI: any) => {
     const doc = new jsPDF(); 
     
     let frameColor = settings.ficheColor;
@@ -168,47 +168,49 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
     doc.setTextColor(0, 0, 0);
     doc.setFont('times', 'normal');
 
-    if (d.sheetImage && d.sheetImageRatio) {
-        const maxWidth = 170; 
-        const maxHeight = 80; 
+    // Illustrations : la principale en haut (comme avant), les autres en bas de la fiche (voir plus loin).
+    // Sous chaque image : « crédits (photographiques ou artistiques) ou légende », sur plusieurs lignes si besoin.
+    const drawFicheImage = (asset: string, ratio: number | undefined, caption: string, maxHeight: number) => {
+        const src = resolveAsset(asset); // référence « asset:<id> » → data URI
+        if (!src || !src.startsWith('data:image')) return;
+        const maxWidth = 170;
+        let ratioUsed = ratio;
+        if (!ratioUsed) { try { const p = doc.getImageProperties(src); ratioUsed = p.width / p.height; } catch { return; } }
         let imgW = maxWidth;
-        let imgH = imgW / d.sheetImageRatio;
-
-        if (imgH > maxHeight) {
-            imgH = maxHeight;
-            imgW = imgH * d.sheetImageRatio;
-        }
-
+        let imgH = imgW / ratioUsed;
+        if (imgH > maxHeight) { imgH = maxHeight; imgW = imgH * ratioUsed; }
         if (y + imgH > 275) { doc.addPage(); y = 20; }
-        
-        const imgX = 20 + (maxWidth - imgW) / 2; 
-        const formatStr = d.sheetImage.substring(d.sheetImage.indexOf('/') + 1, d.sheetImage.indexOf(';')).toUpperCase();
-        const safeFormat = formatStr === 'JPEG' || formatStr === 'JPG' ? 'JPEG' : 'PNG';
-        
-        doc.addImage(d.sheetImage, safeFormat, imgX, y, imgW, imgH);
+        const imgX = 20 + (maxWidth - imgW) / 2;
+        const formatStr = src.substring(src.indexOf('/') + 1, src.indexOf(';')).toUpperCase();
+        const safeFormat = formatStr === 'JPEG' || formatStr === 'JPG' ? 'JPEG' : formatStr === 'WEBP' ? 'WEBP' : 'PNG';
+        try { doc.addImage(src, safeFormat, imgX, y, imgW, imgH); } catch (err) { console.warn('Image de fiche non exportée :', err); return; }
         y += imgH + 3;
-
-        if (d.imgCredits && d.imgCredits.trim() !== '') {
+        if (caption && caption.trim() !== '') {
             doc.setFontSize(8);
-            doc.setTextColor(150, 150, 150); 
+            doc.setTextColor(150, 150, 150);
             doc.setFont('times', 'italic');
-            const textWidth = doc.getTextWidth(d.imgCredits);
-            doc.text(d.imgCredits, 20 + (maxWidth - textWidth) / 2, y + 2); 
+            const lines: string[] = doc.splitTextToSize(caption.trim(), maxWidth);
+            lines.forEach((line: string) => {
+                if (y > 285) { doc.addPage(); y = 20; }
+                doc.text(line, 20 + (maxWidth - doc.getTextWidth(line)) / 2, y + 2);
+                y += 4;
+            });
             doc.setFont('times', 'normal');
-            doc.setTextColor(0, 0, 0); 
-            y += 6;
+            doc.setTextColor(0, 0, 0);
+            y += 2;
         } else {
             y += 4;
         }
         y += 6;
-    }
+    };
+    if (d.sheetImage) drawFicheImage(d.sheetImage, d.sheetImageRatio, d.imgCredits || '', 80);
 
     doc.setFontSize(11);
     let periodFormatted = d.period || '';
     periodFormatted = periodFormatted.replace(/Cambrien/gi, 'C').replace(/Précambrien/gi, 'PréC').replace(/\uA792/g, 'C');
     
     if (periodFormatted.trim() !== '') {
-        doc.setFont('times', 'bold'); doc.text(`${t('label.period')} :`, 20, y); doc.setFont('times', 'normal');
+        doc.setFont('times', 'bold'); doc.text(`${t('label.period')}${colonSep()}`, 20, y); doc.setFont('times', 'normal');
         doc.text(periodFormatted, 55, y);
         y += 8;
     }
@@ -236,12 +238,13 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
             const temp = pStart; pStart = pEnd; pEnd = temp; 
         }
 
-        const isDeepPrecambrian = (pStart !== null && pStart > 541) || (pEnd !== null && pEnd > 541);
+        const isDeepPrecambrian = (pStart !== null && pStart > PHANEROZOIC_BASE) || (pEnd !== null && pEnd > PHANEROZOIC_BASE);
 
         if (isDeepPrecambrian) {
-            PRECAMBRIAN_EONS.forEach((p: any) => {
-                const pctWidth = ((p.start - p.end) / 4500) * timelineWidth;
-                const pctLeft = ((4500 - p.start) / 4500) * timelineWidth;
+            const MAX = EARTH_AGE;
+            PRECAMBRIAN_EONS.forEach(p => {
+                const pctWidth = ((p.start - p.end) / MAX) * timelineWidth;
+                const pctLeft = ((MAX - p.start) / MAX) * timelineWidth;
                 const pr = parseInt(p.color.substring(1,3), 16); const pg = parseInt(p.color.substring(3,5), 16); const pb = parseInt(p.color.substring(5,7), 16);
                 
                 doc.setFillColor(pr, pg, pb);
@@ -251,9 +254,9 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
             });
 
             if (pStart !== null && pEnd !== null && !isNaN(pStart) && !isNaN(pEnd)) {
-                const iStart = Math.min(4500, Math.max(0, pStart)); const iEnd = Math.min(4500, Math.max(0, pEnd));
-                const iWidth = pStart === pEnd ? 0 : ((iStart - iEnd) / 4500) * timelineWidth;
-                const iLeft = ((4500 - iStart) / 4500) * timelineWidth;
+                const iStart = Math.min(MAX, Math.max(0, pStart)); const iEnd = Math.min(MAX, Math.max(0, pEnd));
+                const iWidth = pStart === pEnd ? 0 : ((iStart - iEnd) / MAX) * timelineWidth;
+                const iLeft = ((MAX - iStart) / MAX) * timelineWidth;
                 doc.setDrawColor(255, 0, 0); 
                 if (pStart === pEnd) {
                     doc.setLineWidth(0.5); doc.line(startX + iLeft, y, startX + iLeft, y + timelineHeight); 
@@ -263,31 +266,23 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
                 doc.setDrawColor(0,0,0); doc.setLineWidth(0.1); 
             }
         } else {
-            const periods = [
-                { abbr: "PréC", start: 600, end: 541, hex: "F08080" }, { abbr: "C", start: 541, end: 485, hex: "99C68E" },
-                { abbr: "O", start: 485, end: 443, hex: "009270" }, { abbr: "S", start: 443, end: 419, hex: "B3E1B6" },
-                { abbr: "D", start: 419, end: 358, hex: "CB8C37" }, { abbr: "C", start: 358, end: 298, hex: "67A599" },
-                { abbr: "P", start: 298, end: 252, hex: "F04028" }, { abbr: "T", start: 252, end: 201, hex: "812B92" },
-                { abbr: "J", start: 201, end: 145, hex: "34B2C9" }, { abbr: "K", start: 145, end: 66, hex: "7FC64E" },
-                { abbr: "Pg", start: 66, end: 23, hex: "FD9A52" }, { abbr: "Ng", start: 23, end: 2.5, hex: "FFE619" },
-                { abbr: "Q", start: 2.5, end: 0, hex: "F9F97F" }
-            ];
+            const MAX = PHANEROZOIC_TIMELINE_MAX;
+            // abbrPdf : les polices standard de jsPDF n'ont pas le glyphe Ꞓ (Cambrien)
+            GEOLOGICAL_PERIODS.forEach(p => {
+                const pctWidth = ((p.start - p.end) / MAX) * timelineWidth;
+                const pctLeft = ((MAX - p.start) / MAX) * timelineWidth;
+                const pr = parseInt(p.color.substring(1,3), 16); const pg = parseInt(p.color.substring(3,5), 16); const pb = parseInt(p.color.substring(5,7), 16);
 
-            periods.forEach(p => {
-                const pctWidth = ((p.start - p.end) / 600) * timelineWidth;
-                const pctLeft = ((600 - p.start) / 600) * timelineWidth;
-                const pr = parseInt(p.hex.substring(0,2), 16); const pg = parseInt(p.hex.substring(2,4), 16); const pb = parseInt(p.hex.substring(4,6), 16);
-                
                 doc.setFillColor(pr, pg, pb);
                 doc.rect(startX + pctLeft, y, pctWidth, timelineHeight, 'FD');
                 doc.setTextColor(0,0,0);
-                if (pctWidth > 4) { doc.setFont('times', 'normal'); doc.text(p.abbr, startX + pctLeft + (pctWidth/2) - 1.5, y + 5.5); }
+                if (pctWidth > 4) { doc.setFont('times', 'normal'); doc.text(p.abbrPdf, startX + pctLeft + (pctWidth/2) - 1.5, y + 5.5); }
             });
 
             if (pStart !== null && pEnd !== null && !isNaN(pStart) && !isNaN(pEnd)) {
-                const iStart = Math.min(600, Math.max(0, pStart)); const iEnd = Math.min(600, Math.max(0, pEnd));
-                const iWidth = pStart === pEnd ? 0 : ((iStart - iEnd) / 600) * timelineWidth;
-                const iLeft = ((600 - iStart) / 600) * timelineWidth;
+                const iStart = Math.min(MAX, Math.max(0, pStart)); const iEnd = Math.min(MAX, Math.max(0, pEnd));
+                const iWidth = pStart === pEnd ? 0 : ((iStart - iEnd) / MAX) * timelineWidth;
+                const iLeft = ((MAX - iStart) / MAX) * timelineWidth;
                 doc.setDrawColor(255, 0, 0); 
                 if (pStart === pEnd) {
                     doc.setLineWidth(0.5); doc.line(startX + iLeft, y, startX + iLeft, y + timelineHeight); 
@@ -308,12 +303,13 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
                 const zoomDuration = zoomStart - zoomEnd;
                 
                 intersectingPeriods.forEach((period) => {
-                    period.subs.forEach((sub: any, i: number) => {
+                    const stages = stagesOf(period);
+                    stages.forEach((sub, i: number) => {
                         const subDuration = sub.s - sub.e;
                         const subWidth = (subDuration / zoomDuration) * timelineWidth;
                         const subLeft = ((zoomStart - sub.s) / zoomDuration) * timelineWidth;
-                        
-                        const shadeAmount = (i / Math.max(1, period.subs.length - 1)) * 40 - 20;
+
+                        const shadeAmount = (i / Math.max(1, stages.length - 1)) * 40 - 20;
                         let hex = period.color.replace(/^\s*#|\s*$/g, '');
                         if (hex.length === 3) hex = hex.replace(/(.)/g, '$1$1');
                         let pr = parseInt(hex.substring(0, 2), 16); let pg = parseInt(hex.substring(2, 4), 16); let pb = parseInt(hex.substring(4, 6), 16);
@@ -373,11 +369,11 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
         y += 8;
     }
 
-    addLine(`${t('label.rank')} :`, d.rank); 
-    addLine(`${t('label.dist')} :`, d.distribution); 
-    addLine(`${t('label.size')} :`, d.size); 
-    addLine(`${t('label.mass')} :`, d.mass); 
-    if (!d.extinct && d.iucn && d.iucn.trim() !== '') { addLine(`${t('label.iucn')} :`, d.iucn); }
+    addLine(`${t('label.rank')}${colonSep()}`, d.rank); 
+    addLine(`${t('label.dist')}${colonSep()}`, d.distribution); 
+    addLine(`${t('label.size')}${colonSep()}`, d.size); 
+    addLine(`${t('label.mass')}${colonSep()}`, d.mass); 
+    if (!d.extinct && d.iucn && d.iucn.trim() !== '') { addLine(`${t('label.iucn')}${colonSep()}`, d.iucn); }
     y += 4;
 
     const addTextBlock = (title: string, text: string) => {
@@ -390,9 +386,9 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
         }
     };
 
-    addTextBlock(`${t('label.diagnose')} :`, d.diagnose);
-    addTextBlock(`${t('label.synapo')} :`, d.synapomorphies);
-    addTextBlock(`${t('label.notes')} :`, d.notes);
+    addTextBlock(`${t('label.diagnose')}${colonSep()}`, d.diagnose);
+    addTextBlock(`${t('label.synapo')}${colonSep()}`, d.synapomorphies);
+    addTextBlock(`${t('label.notes')}${colonSep()}`, d.notes);
 
     const addBiblioBlock = (title: string, text: string) => {
         if (text && text.trim() !== '') {
@@ -417,7 +413,14 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
         }
     };
 
-    addBiblioBlock(`${t('label.biblio')} :`, d.biblio);
+    addBiblioBlock(`${t('label.biblio')}${colonSep()}`, d.biblio);
+
+    // Autres illustrations de la fiche, à la suite, avec leurs crédits ou légendes.
+    const extras = (Array.isArray(d.extraImages) ? d.extraImages : []).filter((im: any) => im && im.asset && im.role !== 'tree');
+    if (extras.length) {
+        y += 4;
+        extras.forEach((im: any) => drawFicheImage(im.asset, im.ratio, im.credits || '', 110));
+    }
 
     if (y > 260) { doc.addPage(); y = 20; }
     doc.setFontSize(8); doc.setTextColor(150);
@@ -426,7 +429,7 @@ export const generateFichePdf = async (d: any, settings: any, lineageStr: string
     y += 6 * splitLineage.length + 3;
 
     doc.setFont('times', 'italic');
-    doc.text(currentLang === 'en' ? "Generated by CladisTree" : "Créé avec CladisTree", 20, y);
+    doc.text(t('pdf.generated'), 20, y);
 
     const pdfDataUri = doc.output('datauristring');
     await electronAPI.saveExport(pdfDataUri, `fiche_${d.name || 'taxon'}.pdf`, 'pdf');

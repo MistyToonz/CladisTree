@@ -1,9 +1,22 @@
 // layout-engine.ts
 import cytoscape from 'cytoscape';
 import { measureTextWidth } from './utils';
-import { GEO_DETAILS } from './chrono-data';
+import { chronoAgeToX as axisAgeToX, ChronoAxisMode, ChronoBoundsMode, computeChronoBounds, chronoEdgeStyle, CHRONO_STYLE_SCRATCH, CHRONO_TRUNK_SCRATCH } from './chrono-axis';
+export { CHRONO_STYLE_SCRATCH };
 
-export const CHRONO_PX_PER_MA = 20;
+/** Espacement horizontal parent → enfant (modes standard et peigne). */
+export const STANDARD_X_GAP = 40;
+/** Cladogramme : distance (px) entre le bord droit d'un parent et la barre verticale de ses branches (`taxi-turn`). */
+export const TAXI_TURN = 15;
+/**
+ * Distance minimale (px) entre le bord droit du parent et un enfant décalé à la main : l'enfant reste à droite
+ * de la barre verticale, avec un bout de branche horizontal (sinon la branche repart vers la gauche et passe
+ * sous la barre).
+ */
+export const MIN_BRANCH_GAP = TAXI_TURN + 10;
+/** Plus petit décalage manuel d'une divergence (mode « glisser les divergences »). */
+export const MIN_BRANCH_OFFSET = MIN_BRANCH_GAP - STANDARD_X_GAP;
+
 export const CHRONO_EDGE_PAD = 40;
 export const CHRONO_BAR_H = 12; 
 export const CHRONO_TICK_H = 14; 
@@ -14,6 +27,48 @@ export const CHRONO_K_LANE = 2;
 export const CHRONO_EMPTY_ROW = 8; 
 export const CHRONO_GAP_EMPTY = 4;
 export const CHRONO_LABEL_COLUMN = false;
+/** Chronogramme : la barre verticale d'une divergence est à au moins 12 px d'elle et à 12 px de son enfant le plus à gauche. */
+export const CHRONO_TRUNK_GAP = 12;
+/** Chronogramme : écart entre un nom (ou une divergence) et son image. */
+export const CHRONO_IMG_GAP = 10;
+
+// --- Écritures minimales (performances, grand arbre) ---
+// Chaque donnée, position ou style réécrit sur un élément fait recalculer son style par Cytoscape : le
+// chronogramme ne touche donc qu'à ce qui a changé depuis la mise en page précédente.
+
+/** Écrit les données d'un élément seulement si elles changent (même règle que setDataIfChanged dans renderer.ts). */
+const setDataIfChanged = (ele: any, values: Record<string, any>) => {
+    const changed: Record<string, any> = {};
+    let any = false;
+    for (const k in values) {
+        const v = values[k]; const cur = ele.data(k);
+        const same = v !== null && typeof v === 'object' ? JSON.stringify(v) === JSON.stringify(cur) : v === cur;
+        if (!same) { changed[k] = v; any = true; }
+    }
+    if (any) ele.data(changed);
+};
+const setPositionIfChanged = (n: any, x: number, y: number) => {
+    const cur = n.position();
+    if (cur.x !== x || cur.y !== y) n.position({ x, y });
+};
+/**
+ * Scratch où est gardé le dernier style posé par le chronogramme sur un élément. Le style n'est effacé et
+ * reposé que s'il diffère. Quiconque efface TOUS les styles posés d'un élément (removeStyle() sans argument,
+ * cf. refreshLayout au retour en standard) doit retirer ce scratch.
+ */
+const applyChronoStyle = (ele: any, style: Record<string, any>) => {
+    const sig = JSON.stringify(style);
+    if (ele.scratch(CHRONO_STYLE_SCRATCH) === sig) return;
+    ele.removeStyle();
+    ele.style(style);
+    ele.scratch(CHRONO_STYLE_SCRATCH, sig);
+};
+
+/**
+ * Nom d'espèce abrégé écrit sans espace (« H.sapiens ») : remis sous la forme « H. sapiens », pour que
+ * l'initiale soit reconnue comme genre (noms complets / compacts, rang automatique).
+ */
+export const normalizeAbbrev = (s: string): string => s.replace(/^([A-Za-z])([.?]+)(?=[A-Za-z])/, '$1$2 ');
 
 export class LayoutEngine {
     
@@ -31,6 +86,7 @@ export class LayoutEngine {
         let suffixMatch = sClean.match(/[”"»”'’\s]+$/);
         let suffix = suffixMatch ? suffixMatch[0] : '';
         if (suffix) sClean = sClean.substring(0, sClean.length - suffix.length);
+        sClean = normalizeAbbrev(sClean);
 
         const words = sClean.split(/[ \t]+/);
         let genus = '';
@@ -69,8 +125,8 @@ export class LayoutEngine {
         
         const rank = node.data('rank');
         
-        // FORÇAGE DU MODE COMPLET : En chronogramme, on ignore le réglage de l'utilisateur
-        const formatToUse = state.layoutMode === 'chrono' ? 'full' : (forceFormat || state.appSettings.speciesFormat);
+        // Format imposé par l'appelant (fiche, PDF) ; sinon, en chronogramme, toujours complet (réglage ignoré).
+        const formatToUse = forceFormat || (state.layoutMode === 'chrono' ? 'full' : state.appSettings.speciesFormat);
         
         // Le nom du genre est systématiquement masqué s'il a des enfants et qu'on est en mode complet
         if (formatToUse === 'full' && rank === 'Genre') {
@@ -84,7 +140,7 @@ export class LayoutEngine {
         if (isSpeciesRank) {
             const firstLine = rawName.split('\n')[0];
             let prefixMatch = firstLine.match(/^[†+”"«“'’\s]+/);
-            let sClean = firstLine.substring(prefixMatch ? prefixMatch[0].length : 0).trim();
+            let sClean = normalizeAbbrev(firstLine.substring(prefixMatch ? prefixMatch[0].length : 0).trim());
             let genusHint = sClean.split(/[ \t]+/)[0].replace(/\./g, '').toLowerCase(); 
             
             let parentGenus = '';
@@ -115,7 +171,7 @@ export class LayoutEngine {
         return rawName;
     }
 
-    static applyLayout(cy: cytoscape.Core, state: any, themeTextColor: string, textWidthCache: Map<string, number>, chronoAxisMode: string = 'linear'): { globalTimeMax: number, globalTimeMin: number } {
+    static applyLayout(cy: cytoscape.Core, state: any, themeTextColor: string, textWidthCache: Map<string, number>, chronoAxisMode: string = 'linear', chronoBoundsMode: ChronoBoundsMode = 'period', romerReserve: { heights: Map<string, number>, gap: number } | null = null): { globalTimeMax: number, globalTimeMin: number } {
         const nodesById = new Map<string, any>();
         const childrenMap = new Map<string, any[]>();
         
@@ -163,12 +219,13 @@ export class LayoutEngine {
             const visualChildren = (isSheetBreak || isCollapsed) ? [] : (childrenMap.get(nodeId) || []);
             const isLeaf = visualChildren.length === 0;
 
-            let hasImage = imgUrlData && imgUrlData.trim() !== '';
-            if (state.layoutMode === 'chrono' && !isLeaf) hasImage = false;
+            // En chronogramme, l'image est placée À CÔTÉ du dessin (après le nom d'un terminal, dans une bande
+            // réservée au-dessus du clade d'une divergence) : elle ne fait pas partie du bloc du nom.
+            const hasImage = !!imgUrlData && imgUrlData.trim() !== '' && state.layoutMode !== 'chrono';
 
             const dynamicName = this.getDynamicNodeName(node, state);
             const isEmptyBranch = (dynamicName === '') && !hasImage;
-            node.data('isEmpty', isEmptyBranch);
+            if (node.data('isEmpty') !== isEmptyBranch) node.data('isEmpty', isEmptyBranch);
 
             const fontSize = node.data('fontSize') || 16;
             const cacheKey = `${dynamicName}_${node.data('extinct')}_${node.data('isBold')}_${node.data('isItalic')}_${node.data('collapsed')}_${hasLink}_${fontSize}_${node.data('fontFamily') || 'serif'}`;
@@ -188,19 +245,7 @@ export class LayoutEngine {
                 const iH = iW / (node.data('imgRatio') || 1);
                 const GAP = 12;
                 
-                let iPos = node.data('imgPos') || 'left';
-                if (state.layoutMode === 'chrono' && !isLeaf) {
-                    let explicitlyDated = false;
-                    if (getStartAgeSafe(node.data('period')) !== null) explicitlyDated = true; 
-                    else {
-                        let curr = node.incomers('node').first();
-                        while (curr && curr.length > 0 && !curr.hasClass('box')) {
-                            if (getStartAgeSafe(curr.data('period')) !== null) { explicitlyDated = true; break; }
-                            curr = curr.incomers('node').first();
-                        }
-                    }
-                    iPos = explicitlyDated ? 'top' : 'left';
-                }
+                const iPos = node.data('imgPos') || 'left';
 
                 if (iPos === 'left') { blockW = iW + GAP + textW; blockH = Math.max(iH, textH); imgOffsetX = -blockW/2 + iW/2; txtOffsetX = blockW/2 - textW/2; } 
                 else if (iPos === 'right') { blockW = textW + GAP + iW; blockH = Math.max(textH, iH); txtOffsetX = -blockW/2 + textW/2; imgOffsetX = blockW/2 - iW/2; } 
@@ -229,11 +274,15 @@ export class LayoutEngine {
                 bgUrls.push(dynamicSvg); bgWidths.push(finalW + 'px'); bgHeights.push('2px'); bgFits.push('none'); bgPosXs.push('50%'); bgPosYs.push('50%');
             }
 
-            node.data({
+            // En chronogramme, cWidth (largeur de la barre) et le décalage de l'image sont écrits plus bas, une fois
+            // la géométrie connue : les écrire aussi ici changerait la donnée deux fois à chaque mise en page.
+            const chronoLater = state.layoutMode === 'chrono' ? {} : { imgOffsetX, imgOffsetY, cWidth: finalW };
+            setDataIfChanged(node, {
+                ...chronoLater,
                 renderWidth: finalW, renderHeight: finalH,
-                imgOffsetX: imgOffsetX, imgOffsetY: imgOffsetY, textMarginX: txtOffsetX, textMarginY: txtOffsetY,
+                textMarginX: txtOffsetX, textMarginY: txtOffsetY,
                 labelW: blockW, labelH: blockH, displayName: dynamicName, computedLabel: labelText,
-                cWidth: finalW, cHeight: finalH, cTextMarginX: txtOffsetX, cTextMarginY: txtOffsetY,
+                cHeight: finalH, cTextMarginX: txtOffsetX, cTextMarginY: txtOffsetY,
                 bgUrls: bgUrls.length > 0 ? bgUrls : null, bgWidthsStr: bgWidths.length > 0 ? bgWidths.join(', ') : '0px', 
                 bgHeightsStr: bgHeights.length > 0 ? bgHeights.join(', ') : '0px', bgPosXsStr: bgPosXs.length > 0 ? bgPosXs.join(', ') : '50%', 
                 bgPosYsStr: bgPosYs.length > 0 ? bgPosYs.join(', ') : '50%', bgFitsStr: bgFits.length > 0 ? bgFits.join(', ') : 'none'
@@ -263,11 +312,7 @@ export class LayoutEngine {
                 }
             });
 
-            if (maxAge === -Infinity || minAge === Infinity) { globalTimeMax = 100; globalTimeMin = 0; } 
-            else {
-                const padding = Math.max((maxAge - minAge) * 0.10, 2);
-                globalTimeMax = maxAge + padding; globalTimeMin = Math.max(0, minAge - padding);
-            }
+            // Bornes de la frise : calculées plus bas, une fois les âges des nœuds internes déduits.
 
             const nodeAges = new Map<string, number>();
             const undatedNodes = new Set<string>();
@@ -301,6 +346,22 @@ export class LayoutEngine {
             };
             cy.nodes().forEach(n => { if (!n.hasClass('box')) calculateAge(n.id()); });
 
+            // --- BORNES DE LA FRISE (bouton « Bornes : période / cladogramme », voir chrono-axis.ts) ---
+            // Le plus ancien tient compte des nœuds internes non datés (placés avant leurs descendants),
+            // sinon la racine pourrait sortir de la frise une fois calée sur une période.
+            if (maxAge !== -Infinity && minAge !== Infinity) {
+                let oldest = maxAge;
+                cy.nodes(':visible').forEach((n: any) => {
+                    if (n.hasClass('box') || undatedNodes.has(n.id())) return;
+                    const a = nodeAges.get(n.id());
+                    if (a !== undefined && a > oldest) oldest = a;
+                });
+                const b = computeChronoBounds(chronoBoundsMode, oldest, minAge);
+                globalTimeMax = b.max; globalTimeMin = b.min;
+            } else {
+                globalTimeMax = 100; globalTimeMin = 0;
+            }
+
             let chronoRankAges: number[] = [];
             if (chronoAxisMode === 'rank') {
                 const seen = new Set<number>();
@@ -320,45 +381,30 @@ export class LayoutEngine {
                 chronoRankAges = ages;
             }
 
-            const chronoWarp = (age: number): number => {
-                const a = Math.max(0, age);
-                if (chronoAxisMode === 'sqrt') return Math.sqrt(a);
-                if (chronoAxisMode === 'log') return Math.log1p(a);
-                if (chronoAxisMode === 'rank') {
-                    const n = chronoRankAges.length;
-                    if (n === 0) return a;
-                    if (a <= chronoRankAges[0]) return 0;
-                    if (a >= chronoRankAges[n - 1]) return n - 1;
-                    let lo = 0, hi = n - 1;
-                    while (hi - lo > 1) {
-                        const mid = (lo + hi) >> 1;
-                        if (chronoRankAges[mid] <= a) lo = mid; else hi = mid;
-                    }
-                    const span = chronoRankAges[hi] - chronoRankAges[lo];
-                    return span <= 0 ? lo : lo + (a - chronoRankAges[lo]) / span;
-                }
-                return a;
-            };
+            // Conversion âge → abscisse : source unique dans chrono-axis.ts (échelle par morceaux, Précambrien comprimé).
+            const chronoAgeToX = (age: number): number =>
+                axisAgeToX(chronoAxisMode as ChronoAxisMode, globalTimeMin, globalTimeMax, chronoRankAges, age);
 
-            const chronoAgeToX = (age: number): number => {
-                const a = Math.max(0, age);
-                const linear = -(a * CHRONO_PX_PER_MA);
-                if (chronoAxisMode === 'linear') return linear;
-                const lo = globalTimeMin;
-                const hi = globalTimeMax;
-                if (!(hi > lo)) return linear;
-                const wLo = chronoWarp(lo);
-                const wHi = chronoWarp(hi);
-                if (!(wHi > wLo)) return linear;
-                const u = (chronoWarp(a) - wLo) / (wHi - wLo);
-                return -(lo * CHRONO_PX_PER_MA) - u * ((hi - lo) * CHRONO_PX_PER_MA);
+            // Enfants affichés : un clade replié ou un renvoi de feuille est dessiné comme un terminal, sans
+            // réserver de lignes pour ses descendants cachés (les âges, eux, tiennent compte de tout le clade).
+            const shownKids = (nId: string): any[] => {
+                const n = nodesById.get(nId);
+                if (!n || (n.data('hasNewSheet') && nId !== state.currentRootId) || n.data('collapsed')) return [];
+                return childrenMap.get(nId) || [];
+            };
+            /** Taille de l'image de la fiche, ou null (mêmes champs qu'en cladogramme : imgSize, imgRatio). */
+            const imageOf = (n: any): { w: number, h: number } | null => {
+                const raw = n.data('imgUrl');
+                if (!raw || String(raw).trim() === '') return null;
+                const w = n.data('imgSize') || 150;
+                return { w, h: w / (n.data('imgRatio') || 1) };
             };
 
             const chronoGeom = new Map<string, any>();
             cy.nodes().forEach((n: any) => {
                 if (n.hasClass('box')) return;
                 const s = nodeAges.get(n.id()) || 0;
-                const kids = childrenMap.get(n.id()) || [];
+                const kids = shownKids(n.id());
                 let e = s; let isInter = false;
                 if (kids.length === 0) {
                     const rM = (n.data('period') || '').match(/([\d.,]+)\s*-\s*([\d.,]+)/);
@@ -369,13 +415,39 @@ export class LayoutEngine {
                 chronoGeom.set(n.id(), { isInterval: isInter, isLeaf: kids.length === 0, glyphL: gL, glyphR: gR, labelW: n.data('isEmpty') ? 0 : n.data('labelW') });
             });
 
+            // --- LIGNES (axe vertical ; l'axe horizontal = le temps n'est jamais touché par les images) ---
+            // Terminal : une ligne, agrandie à la hauteur de son image (dessinée après son nom, sur sa ligne :
+            // à droite d'un nom terminal, rien d'autre n'est dessiné, les branches de ses ancêtres étant à sa gauche).
+            // Divergence illustrée : bande de la hauteur de l'image réservée juste AU-DESSUS de son clade ; l'image
+            // s'y place à droite du point de divergence, zone qu'aucune branche ni barre ne traverse (les troncs des
+            // ancêtres sont à gauche de la divergence, ses propres branches partent sous la bande).
             let cursorY = 0;
             const chronoY = new Map<string, number>();
+            const imageBandTop = new Map<string, number>();
+            // Fuseau du romérogramme (romer.ts › romerReserve) : une seule bande de la hauteur du fuseau, à la place
+            // des lignes de ses taxons (cachés) ; les fuseaux restent serrés comme des taxons voisins.
+            const pinSubtree = (nId: string, y: number) => shownKids(nId).forEach(k => { chronoY.set(k.id(), y); pinSubtree(k.id(), y); });
             const layoutChronoY = (nId: string): number => {
-                const kids = childrenMap.get(nId) || [];
+                const kids = shownKids(nId);
+                const reserved = romerReserve ? romerReserve.heights.get(nId) : undefined;
+                if (reserved !== undefined) {
+                    const half = reserved / 2 + romerReserve!.gap / 2;
+                    const y = Math.round(cursorY + Math.max(CHRONO_GAP_MIN + 9, half));
+                    chronoY.set(nId, y); pinSubtree(nId, y);
+                    cursorY = y + Math.max(28, half); return y;
+                }
+                const n = nodesById.get(nId);
+                const img = n ? imageOf(n) : null;
                 if (kids.length === 0) {
-                    const y = Math.round(cursorY + CHRONO_GAP_MIN + 9);
-                    chronoY.set(nId, y); cursorY = y + 28; return y;
+                    const above = img ? Math.max(9, img.h / 2) : 9;
+                    const below = img ? Math.max(28, img.h / 2 + 10) : 28;
+                    const y = Math.round(cursorY + CHRONO_GAP_MIN + above);
+                    chronoY.set(nId, y); cursorY = y + below; return y;
+                }
+                if (img) {
+                    const top = cursorY + CHRONO_GAP_MIN;
+                    imageBandTop.set(nId, top);
+                    cursorY = top + img.h + 6;
                 }
                 let sY = 0;
                 kids.forEach(k => sY += layoutChronoY(k.id()));
@@ -385,9 +457,10 @@ export class LayoutEngine {
             if (nodesById.has(state.currentRootId)) layoutChronoY(state.currentRootId);
 
             cy.nodes().forEach((n: any) => {
-                if (n.hasClass('box') || !visibleNodes.has(n.id())) { n.style('display', 'none'); return; }
-                n.style('display', 'element');
-                const g = chronoGeom.get(n.id()); if(!g) return;
+                if (n.hasClass('box')) { n.style('display', 'none'); return; } // boîtes : stylées ensuite par refreshLayout
+                if (!visibleNodes.has(n.id())) { applyChronoStyle(n, { 'display': 'none' }); return; }
+                const g = chronoGeom.get(n.id());
+                if (!g) { n.style('display', 'element'); return; }
                 const y = chronoY.get(n.id()) || 0;
                 
                 let nw = 0.1, nh = 0.1, bgOp = 0, tH = 'left', tV = 'top', txtX = 0, txtY = 0;
@@ -396,15 +469,15 @@ export class LayoutEngine {
                 
                 if (g.isInterval) {
                     nw = Math.max(g.glyphR - g.glyphL, 2); nh = CHRONO_BAR_H; bgOp = 1;
-                    n.position({ x: (g.glyphL + g.glyphR)/2, y });
+                    setPositionIfChanged(n, (g.glyphL + g.glyphR)/2, y);
                     tH = 'right'; tV = 'center'; txtX = CHRONO_LABEL_GAP; txtY = 0;
                 } else if (g.isLeaf) {
                     nw = 2; nh = CHRONO_TICK_H; bgOp = 1;
-                    n.position({ x: g.glyphL, y });
+                    setPositionIfChanged(n, g.glyphL, y);
                     tH = 'right'; tV = 'center'; txtX = CHRONO_LABEL_GAP; txtY = 0;
                 } else {
                     nw = 0.1; nh = 0.1; bgOp = 0;
-                    n.position({ x: g.glyphL, y });
+                    setPositionIfChanged(n, g.glyphL, y);
                     
                     // --- PLACEMENT INTELLIGENT DU TEXTE ---
                     // 1. Calcul de la longueur de la branche (distance entre le parent et ce noeud)
@@ -436,17 +509,31 @@ export class LayoutEngine {
                     }
                 }
 
-                n.removeStyle();
+                // Image de la fiche (calque HTML, export-images.ts) : décalage depuis la position du nœud.
+                const img = imageOf(n);
+                let imgOffsetX = 0, imgOffsetY = 0;
+                if (img) {
+                    if (g.isLeaf) {
+                        imgOffsetX = nw / 2 + CHRONO_LABEL_GAP + (g.labelW || 0) + CHRONO_IMG_GAP + img.w / 2;   // après le nom
+                    } else {
+                        const top = imageBandTop.get(n.id());
+                        imgOffsetX = CHRONO_IMG_GAP + img.w / 2;                                              // à droite de la divergence
+                        imgOffsetY = top !== undefined ? top + img.h / 2 - y : 0;                            // dans la bande réservée
+                    }
+                }
+                setDataIfChanged(n, { imgOffsetX, imgOffsetY });
+
                 const bw = g.isInterval ? (conflict ? 2 : 1) : 0;
-                
-                n.style({ 
-                    'width': nw+'px', 'height': nh+'px', 'background-opacity': bgOp, 
-                    'text-halign': tH, 'text-valign': tV, 'text-margin-x': txtX+'px', 'text-margin-y': txtY+'px', 
-                    'background-color': '#90A4AE', 'border-width': bw + 'px', 'border-style': 'solid', 
+
+                // Sans 'display' : l'élément visible n'a pas de visibilité posée (valeur par défaut = affiché).
+                applyChronoStyle(n, {
+                    'width': nw+'px', 'height': nh+'px', 'background-opacity': bgOp,
+                    'text-halign': tH, 'text-valign': tV, 'text-margin-x': txtX+'px', 'text-margin-y': txtY+'px',
+                    'background-color': '#90A4AE', 'border-width': bw + 'px', 'border-style': 'solid',
                     'border-color': borderColor, 'border-opacity': 1, 'shape': 'rectangle', 'padding': '0px'
-                } as any);
-                
-                n.data({ cWidth: nw, chronoOuterWidth: g.isInterval ? nw + 2 : (g.isLeaf ? 2 : 0.1) });
+                });
+
+                setDataIfChanged(n, { cWidth: nw, chronoOuterWidth: g.isInterval ? nw + 2 : (g.isLeaf ? 2 : 0.1) });
             });
 
             // GÉOMÉTRIE MATHÉMATIQUE INFAILLIBLE : Alignement absolu sur le bord cible
@@ -465,7 +552,6 @@ export class LayoutEngine {
 
             cy.edges().forEach(e => {
                 if (e.id() === 'ghost-edge') return;
-                e.removeStyle();
 
                 const source = e.source();
                 const target = e.target();
@@ -490,40 +576,19 @@ export class LayoutEngine {
                 const distSq = dx * dx + dy * dy;
 
                 if (distSq < 0.0001) {
-                    e.style({ 'display': 'none' } as any);
+                    applyChronoStyle(e, { 'display': 'none' });
                     return;
                 }
 
-                const dist = Math.sqrt(distSq);
-
                 const minLeftX = minChildLeftXByParent.get(source.id()) || sx;
-                const targetTrunkX = Math.max(sx + 12, minLeftX - 12);
-                const turnDist = targetTrunkX - sx;
-
-                const x1 = turnDist;
-                const y1 = 0;
-                
-                const x2 = turnDist;
-                const y2 = dy;
-
-                const w1 = (x1 * dx + y1 * dy) / distSq;
-                const d1 = (y1 * dx - x1 * dy) / dist;
-
-                const w2 = (x2 * dx + y2 * dy) / distSq;
-                const d2 = (y2 * dx - x2 * dy) / dist;
-
-                e.style({
-                    'curve-style': 'segments',
-                    'segment-weights': `${w1} ${w2}`,
-                    'segment-distances': `${d1} ${d2}`,
-                    'source-endpoint': '0px 0px',
-                    'target-endpoint': `${targetOffsetX}px 0px`,
-                    'edge-distances': 'endpoints'
-                } as any);
+                const targetTrunkX = Math.max(sx + CHRONO_TRUNK_GAP, minLeftX - CHRONO_TRUNK_GAP);
+                // Tronc mémorisé : le romérogramme prolonge la branche jusqu'à la pointe d'un fuseau sans le déplacer.
+                e.scratch(CHRONO_TRUNK_SCRATCH, targetTrunkX);
+                applyChronoStyle(e, chronoEdgeStyle(sx, sy, ex, ey, targetTrunkX, targetOffsetX));
             });
 
         } else {
-            let currentY = 0; const xGap = 40; const yGap = state.layoutMode === 'comb' ? 16 : 60;   
+            let currentY = 0; const xGap = STANDARD_X_GAP; const yGap = state.layoutMode === 'comb' ? 16 : 60;   
             let maxLeafLeftX = 0; 
             const stepsToLeafMap = new Map<string, number>();
             const tightDistMap = new Map<string, number>();
@@ -584,7 +649,9 @@ export class LayoutEngine {
                 } else {
                     let startY = currentY; let sumY = 0; 
                     childrenArray.forEach(child => { 
-                        let nextLeftX = rightX + xGap; 
+                        // Décalage manuel de la divergence le long de sa branche (mode « glisser les divergences »).
+                        const manualOffset = state.layoutMode === 'standard' ? Math.max(MIN_BRANCH_OFFSET, child.data('branchOffset') || 0) : 0;
+                        let nextLeftX = rightX + xGap + manualOffset; 
                         if (state.layoutMode === 'comb') {
                             const childSteps = stepsToLeafMap.get(child.id()) || 0;
                             const childTight = tightDistMap.get(child.id()) || 0;

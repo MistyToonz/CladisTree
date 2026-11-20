@@ -1,4 +1,5 @@
-import { t } from './i18n';
+import { t, LANGS, LANG_NAMES } from './i18n';
+import { BRAND, brandMediaHTML } from './brand';
 
 export const APP_CSS = `
   :root { --bg-panel: #f4f4f4; --text-main: #000000; --border-color: #cccccc; --bg-topbar: #ffffff; --text-topbar: #000000; --bg-hover: #e0e0e0; --bg-input: #ffffff; --text-input: #000000; --panel-shadow: 0 4px 15px rgba(0,0,0,0.1); --btn-radius: 3px; --ui-font: system-ui, -apple-system, sans-serif; }
@@ -10,7 +11,9 @@ export const APP_CSS = `
   [data-theme="dimmed"] { --bg-panel: #2b2b2b; --text-main: #a9a9a9; --border-color: #555555; --bg-topbar: #222222; --text-topbar: #a9a9a9; --bg-hover: #404040; --bg-input: #262626; --text-input: #a9a9a9; --panel-shadow: 0 4px 6px rgba(0,0,0,0.3); --btn-radius: 3px; --ui-font: system-ui, -apple-system, sans-serif; }
   
   body { background-color: var(--bg-panel); color: var(--text-main); margin: 0; overflow: hidden; font-family: var(--ui-font); font-size: 12px; }
-  #app { background-color: #ffffff !important; position: absolute; top: 40px; bottom: 35px; left: 0; right: 0; }
+  /* Canevas sous la barre du haut ET le ruban (--topbar-h, tenu à jour par ribbon.ts), au-dessus de la barre des feuilles.
+     Hauteur donnée par top/bottom : le height:100vh de index.html le faisait déborder sous la fenêtre. */
+  #app { background-color: #ffffff !important; position: absolute; top: calc(var(--topbar-h, 36px) + 4px); bottom: 35px; left: 0; right: 0; width: auto !important; height: auto !important; }
   input, select, textarea, button { font-family: var(--ui-font); border-radius: var(--btn-radius); font-size: 12px; }
   input, select, textarea { background-color: var(--bg-input); color: var(--text-input); border: 1px solid var(--border-color); outline:none; }
   button { color: var(--text-main); }
@@ -22,25 +25,57 @@ export const APP_CSS = `
   button { color: var(--text-main); } /* <-- Ligne à ajouter */
 `;
 
-export const getWelcomeHTML = (logoUrl: string, version: string) => `
-  <div id="welcome-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-panel); z-index:9999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(3px);">
-    <div style="background:var(--bg-topbar); color:var(--text-topbar); padding:40px 50px; border-radius:8px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.5); max-width:450px; width:100%; border:1px solid var(--border-color); position:relative;">
-      <img src="${logoUrl}" alt="CladisTree Logo" style="height:80px; margin-bottom:15px; display:block; margin-left:auto; margin-right:auto; object-fit:contain;">
-      <h1 style="margin:0 0 10px 0; font-size:36px; color:#2196F3; font-family:serif; letter-spacing:1px;">CladisTree</h1>
-      <p style="font-size:14px; margin-bottom:20px; opacity:0.8;">${t('welcome.subtitle')}</p>
-      
-      <button id="btn-start" style="padding:10px 25px; font-size:14px; background:#4CAF50; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; box-shadow:0 2px 5px rgba(0,0,0,0.2); transition:transform 0.1s; margin-bottom:15px;">${t('welcome.new_project')}</button>
-      
-      <div style="font-size:12px; background:var(--bg-panel); color:var(--text-main); padding:10px; border-radius:4px; border:1px dashed var(--border-color);">
-        <i>${t('welcome.tip')}</i>
+/**
+ * Hub d'accueil (phase 4) : nouveau document à partir d'un modèle, ouverture, projets récents (cartes avec
+ * miniature, remplies par file-io.ts › loadRecentFilesUI), choix de la langue au premier lancement.
+ * Les listes « Nouveau » / « Ouvrir » sont dessinées comme un petit cladogramme (motif du logo).
+ * Styles : VISUAL_CSS (visual.ts) ; comportement : hub.ts.
+ */
+export const getWelcomeHTML = (version: string, modeLogos: { standard: string; comb: string; chrono: string }) => `
+  <div id="welcome-overlay" class="hub" role="dialog" aria-label="CladisTree">
+    <header class="hub-head">
+      ${brandMediaHTML(BRAND.hub, 'hub-logo', 'CladisTree', undefined, 'topbar')}
+      <div class="hub-titles">
+        <div class="hub-title">CladisTree</div>
+        <div class="hub-sub" id="hub-subtitle">${t('welcome.subtitle')}</div>
       </div>
-
-      <div id="recent-files-container" style="display:none; text-align:left; margin-top:20px; background:var(--bg-panel); padding:12px; border-radius:4px; border:1px solid var(--border-color);">
-        <div style="font-weight:bold; font-size:12px; margin-bottom:8px; color:var(--text-main); border-bottom:1px solid var(--border-color); padding-bottom:4px;">${t('welcome.recent')}</div>
-        <div id="recent-files-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+      <span class="hub-version">${t('welcome.version')} ${version}</span>
+      <button class="hub-close" id="hub-close" title="${t('hub.back')}" style="display:none;">${t('hub.back')} &#x2192;</button>
+    </header>
+    <main class="hub-body">
+      <section class="hub-col hub-start">
+        <h2 class="hub-h" id="hub-new-title">${t('hub.new')}</h2>
+        <ul class="hub-tree" data-topology="standard,comb;chrono">
+          ${(['standard', 'comb', 'chrono'] as const).map((mode, k) => `
+          <li style="--i:${k}" data-key="${mode}"><button class="hub-action" data-template="${mode}">
+            <img class="hub-mode-icon" src="${modeLogos[mode]}" alt="" draggable="false">
+            <span class="hub-action-text"><b>${t('hub.tpl.' + mode)}</b><small>${t('hub.tpl.' + mode + '_desc')}</small></span>
+          </button></li>`).join('')}
+        </ul>
+        <h2 class="hub-h" id="hub-open-title">${t('hub.open')}</h2>
+        <ul class="hub-tree" data-topology="open">
+          <li style="--i:3" data-key="open"><button class="hub-action" id="hub-open">
+            <span class="hub-open-glyph" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="hub-action-text"><b>${t('hub.open_file')}</b><small>${t('hub.open_formats')}</small></span>
+          </button></li>
+        </ul>
+        <p class="hub-tip" id="hub-tip">${t('welcome.tip')}</p>
+      </section>
+      <section class="hub-col hub-recent" id="recent-files-container">
+        <h2 class="hub-h" id="hub-recent-title">${t('welcome.recent')}</h2>
+        <div id="recent-files-list" class="hub-grid"></div>
+        <p class="hub-empty" id="hub-recent-empty">${t('hub.recent_empty')}</p>
+      </section>
+    </main>
+    <div class="hub-lang" id="hub-lang" style="display:none;">
+      <div class="hub-lang-box">
+        ${brandMediaHTML(BRAND.logo, 'hub-lang-logo')}
+        <div class="hub-lang-title">Langue &middot; Language &middot; Idioma &middot; Lingua &middot; Sprache</div>
+        <div class="hub-lang-choices">
+          ${LANGS.map(l => `<button class="hub-action" data-lang="${l}"><span class="hub-action-text"><b>${LANG_NAMES[l]}</b></span></button>`).join('')}
+        </div>
+        <div class="hub-lang-note">Modifiable ensuite dans les Paramètres &middot; Can be changed later in Settings</div>
       </div>
-
-      <div style="margin-top:20px; font-size:11px; opacity:0.5; font-weight:bold;">${t('welcome.version')} ${version}</div>
     </div>
   </div>
 `;
@@ -73,6 +108,7 @@ export const CONTEXT_MENU_HTML = `
   <div class="menu-item" id="cmenu-paste" style="${menuItemStyle}">${t('menu.paste')}</div>
   <div style="border-top:1px solid var(--border-color); margin:2px 0;"></div>
   <div class="menu-item" id="cmenu-graft" style="${menuItemStyle} font-weight:bold; color:#2196F3;">${t('menu.graft')}</div>
+  <div class="menu-item" id="cmenu-export-branch" style="${menuItemStyle}">${t('menu.export_branch')}</div>
 `;
 
 export const STYLE_MENU_HTML = `
@@ -152,17 +188,12 @@ export const TABLE_MODAL_HTML = `
   </div>
 `;
 
-export const EMPTY_DATA = { status: t('data.valid'), rank: t('data.unranked'), discoveryDate: "", distribution: "", author: "", size: "", mass: "", period: "", synapomorphies: "", notes: "", collapsed: false, hasNewSheet: false, fontFamily: 'serif', fontSize: 16, imgUrl: '', imgSize: 30, imgRatio: 1, imgPos: 'left', hasFrame: false, frameColor: '#000000', imgCredits: '' };
+// EMPTY_DATA (champs d'une fiche vide) : voir config.ts. L'ancienne copie d'ici, inutilisée, avait des valeurs
+// fausses (statut traduit au lieu de la valeur canonique « Valide », imgSize 30 au lieu de 150).
 
 export const TAXONOMIC_RANKS = ['Clade (non-classé)', 'Domaine', 'Règne', 'Sous-règne', 'Embranchement (Phylum)', 'Sous-embranchement', 'Super-classe', 'Classe', 'Sous-classe', 'Infra-classe', 'Super-ordre', 'Ordre', 'Sous-ordre', 'Infra-ordre', 'Micro-ordre', 'Parv-ordre', 'Super-famille', 'Famille', 'Sous-famille', 'Tribu', 'Sous-tribu', 'Genre', 'Sous-genre', 'Espèce', 'Sous-espèce'];
 
-export const GEOLOGICAL_PERIODS = [ { name: 'Précambrien', abbr: 'Pre\uA792', start: 600, end: 538.8, color: '#F0A0B0' }, { name: 'Cambrien', abbr: '\uA792', start: 538.8, end: 485.4, color: '#7FA056' }, { name: 'Ordovicien', abbr: 'O', start: 485.4, end: 443.8, color: '#009270' }, { name: 'Silurien', abbr: 'S', start: 443.8, end: 419.2, color: '#B3E1B6' }, { name: 'Dévonien', abbr: 'D', start: 419.2, end: 358.9, color: '#CB8C37' }, { name: 'Carbonifère', abbr: 'C', start: 358.9, end: 298.9, color: '#67A599' }, { name: 'Permien', abbr: 'P', start: 298.9, end: 251.9, color: '#F04028' }, { name: 'Trias', abbr: 'T', start: 251.9, end: 201.4, color: '#812B92' }, { name: 'Jurassique', abbr: 'J', start: 201.4, end: 145, color: '#34B2C9' }, { name: 'Crétacé', abbr: 'K', start: 145, end: 66, color: '#7FC64E' }, { name: 'Paléogène', abbr: 'Pg', start: 66, end: 23, color: '#FDA75F' }, { name: 'Néogène', abbr: 'Ng', start: 23, end: 2.58, color: '#FFE619' }, { name: 'Quaternaire', abbr: 'Q', start: 2.58, end: 0, color: '#F9F97F' } ];
-export const PRECAMBRIAN_EONS = [
-  { name: 'Hadéen', abbr: 'Had', start: 4500, end: 4000, color: '#6A5ACD' },
-  { name: 'Archéen', abbr: 'Arch', start: 4000, end: 2500, color: '#A020F0' },
-  { name: 'Protérozoïque', abbr: 'Prot', start: 2500, end: 538.8, color: '#F08080' },
-  { name: 'Phanérozoïque', abbr: 'Phan', start: 538.8, end: 0, color: '#99C68E' }
-];
+// Âges géologiques : voir chrono-data.ts (source unique, charte ICS).
 
 // --- FONCTIONS UTILITAIRES MANQUANTES ---
 

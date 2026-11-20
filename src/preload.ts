@@ -8,7 +8,7 @@ const APP_VERSION = versionArg ? versionArg.slice('--app-version='.length) : '';
 // On expose une API personnalisée dans l'objet global 'window'
 contextBridge.exposeInMainWorld('electronAPI', {
   // Fonction pour sauvegarder un fichier
-  saveFile: (data: string, filePath?: string) => ipcRenderer.invoke('save-file', data, filePath),
+  saveFile: (data: string, filePath?: string, defaultName?: string) => ipcRenderer.invoke('save-file', data, filePath, defaultName),
   
   // Fonction pour ouvrir un fichier
   openFile: () => ipcRenderer.invoke('open-file'),
@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Fonction pour lire le fichier directement grâce au chemin reçu
   readFileDirect: (filePath: string) => ipcRenderer.invoke('read-file-direct', filePath),
+  pickAudio: () => ipcRenderer.invoke('pick-audio'),
+  writeTreeClipboard: (newick: string, json: string) => ipcRenderer.invoke('clipboard-write-tree', newick, json),
+  readTreeClipboard: () => ipcRenderer.invoke('clipboard-read-tree'),
 
   saveExport: (data: string, defaultName: string, ext: string) => ipcRenderer.invoke('save-export', data, defaultName, ext),
   openNewInstance: () => ipcRenderer.send('open-new-instance'),

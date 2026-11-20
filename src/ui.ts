@@ -1,6 +1,8 @@
 // ui.ts
-import { APP_CSS, getWelcomeHTML, CREDITS_HTML, CONTEXT_MENU_HTML, COMPILE_MODAL_HTML, TABLE_MODAL_HTML, TAXONOMIC_RANKS, GEOLOGICAL_PERIODS } from './utils';
-import { t, currentLang } from './i18n';
+import { VISUAL_CSS } from './visual';
+import { APP_CSS, getWelcomeHTML, CREDITS_HTML, CONTEXT_MENU_HTML, COMPILE_MODAL_HTML, TABLE_MODAL_HTML, TAXONOMIC_RANKS } from './utils';
+import { GEOLOGICAL_PERIODS, PRECAMBRIAN_EONS, PHANEROZOIC_TIMELINE_MAX, EARTH_AGE } from './chrono-data';
+import { t, currentLang, LANGS, LANG_NAMES, colonSep } from './i18n';
 
 // Version reelle du paquet, transmise par le processus principal.
 const APP_VERSION = (window as any).electronAPI?.appVersion || '';
@@ -18,11 +20,31 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
     .ribbon-group { display: flex; flex-direction: column; border-right: 1px solid var(--border-color); padding-right: 20px; }
     .ribbon-group-title { font-size: 10px; opacity: 0.6; text-transform: uppercase; text-align: center; margin-top: 8px; font-weight: bold; letter-spacing: 1px; }
     .ribbon-row { display: flex; gap: 8px; align-items: center; }
+
+    /* Icônes des modes inactifs (Disposition) : dessinées en noir, éclaircies sur les thèmes à fond sombre */
+    [data-theme="dark"], [data-theme="dimmed"], [data-theme="console"], [data-theme="high-contrast"] { --layout-icon-filter: invert(1) brightness(1.6); }
+
+    /* Onglets (phase 2) : même palette que le reste de l'interface, accent #2196F3 */
+    .ribbon-tabs { display: flex; align-items: stretch; align-self: stretch; margin-left: 6px; }
+    .ribbon-tab { padding: 0 14px; font-size: 13px; font-weight: bold; color: var(--text-main); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; opacity: 0.75; transition: all 0.2s; }
+    .ribbon-tab:hover { opacity: 1; background: var(--bg-hover); }
+    .ribbon-tab.active { opacity: 1; color: #2196F3; border-bottom-color: #2196F3; background: var(--bg-panel); }
+    .ribbon { position: relative; background: var(--bg-panel); border-bottom: 1px solid var(--border-color); box-shadow: inset 0 4px 6px rgba(0,0,0,0.02); }
+    /* Hauteur constante : pas de retour à la ligne ; défilement horizontal si la fenêtre est trop étroite. */
+    .ribbon-panel { padding: 10px 50px 10px 20px; gap: 18px; align-items: flex-start; flex-wrap: nowrap; overflow-x: auto; font-size: 12px; }
+    .ribbon-group { flex-shrink: 0; }
+    .ribbon-panel::after { content: ''; flex: 0 0 24px; } /* marge de fin réelle (le padding est ignoré en défilement), sous le bouton ▲ */
+    .ribbon-btn { padding: 4px 10px; cursor: pointer; background: var(--bg-input); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px; font-size: 12px; font-weight: bold; transition: all 0.2s; white-space: nowrap; }
+    .ribbon-btn:hover:not(:disabled) { background: var(--bg-hover); border-color: #2196F3; }
+    .ribbon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .ribbon-btn.active { background: rgba(33, 150, 243, 0.15); color: #2196F3; border-color: #2196F3; }
+    .ribbon-collapse { position: absolute; top: 8px; right: 14px; background: transparent; border: none; color: var(--text-main); cursor: pointer; font-size: 12px; opacity: 0.5; transition: opacity 0.2s; }
+    .ribbon-collapse:hover { opacity: 1; }
     
     .settings-section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
     .settings-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
     .settings-title { font-size: 14px; font-weight: bold; margin: 0 0 10px 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); }
-  `;
+  ` + VISUAL_CSS;
   document.head.appendChild(styleSheet);
   document.body.setAttribute('data-theme', 'light');
 
@@ -36,7 +58,7 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
     }).join('');
 
   const uiHTML = `
-    ${getWelcomeHTML(logoPT, APP_VERSION)}
+    ${getWelcomeHTML(APP_VERSION, { standard: logoNormal, comb: logoPeigne, chrono: logoChrono })}
     
     <div id="credits-overlay" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:none; justify-content:center; align-items:center; z-index:9998; backdrop-filter:blur(4px);">
       ${CREDITS_HTML}
@@ -51,16 +73,18 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                 <div class="dropdown-content">
                     <div class="dropdown-item" id="btn-new">${t('topbar.file.new')}</div>
                     <div class="dropdown-item" id="btn-new-window">${t('topbar.file.new_window')}</div>
+                    <div class="dropdown-item" id="btn-hub">${t('hub.menu')}</div>
                     <div class="dropdown-item" id="btn-load">${t('topbar.file.open')}</div>
                     <div class="dropdown-item" id="btn-save" style="color: #4CAF50; font-weight: bold;">${t('topbar.file.save')}</div>
                     <div class="dropdown-item" id="btn-save-as">${t('topbar.file.saveas')}</div>
+                    <div class="dropdown-item" id="btn-save-legacy" title="${t('topbar.file.save_legacy_title')}">${t('topbar.file.save_legacy')}</div>
                     <div style="border-top:1px solid var(--border-color); margin: 4px 0;"></div>
                     <div style="padding: 8px 12px; display:flex; flex-direction:column; gap:5px;">
                         <span id="lbl-topbar-export" style="font-size:12px; opacity:0.8;">${t('topbar.file.export')}</span>
                         <div style="display:flex; flex-direction:column; gap:5px;">
                             <div style="display:flex; gap:5px;">
                                 <select id="export-select" style="padding:4px; font-size:11px; flex:1; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input);" title="${t('export.format')}">
-                                    <option value="png">PNG</option><option value="jpeg">JPEG</option><option value="svg">SVG</option><option value="pdf">PDF</option>
+                                    <option value="png">PNG</option><option value="jpeg">JPEG</option><option value="svg">SVG</option><option value="pdf">PDF</option><option value="nwk">Newick</option><option value="nex">NEXUS</option>
                                 </select>
                                 <select id="export-scale-select" style="padding:4px; font-size:11px; flex:1; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input);" title="${t('export.resolution')}">
                                     <option value="1">${t('export.res.low')}</option>
@@ -78,65 +102,26 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                 </div>
             </div>
 
-            <div class="dropdown">
-                <button class="menu-btn" id="lbl-topbar-view">${t('topbar.view')}</button>
-                <div class="dropdown-content">
-                    <div class="dropdown-item" id="btn-recenter">${t('topbar.view.recenter')}</div>
-                    <div class="dropdown-item" id="btn-center-root">${t('topbar.view.center_root')}</div>
-                    <div class="dropdown-item" id="btn-expand-all">${t('topbar.view.expand')}</div>
-                </div>
+
+
+
+
+            <div class="ribbon-tabs" role="tablist">
+                <button class="ribbon-tab" id="tab-style" data-tab="style" role="tab">${t('tab.style')}</button>
+                <button class="ribbon-tab" id="tab-display" data-tab="display" role="tab">${t('tab.display')}</button>
+                <button class="ribbon-tab" id="tab-tree" data-tab="tree" role="tab">${t('tab.tree')}</button>
+                <button class="ribbon-tab" id="tab-help" data-tab="help" role="tab">${t('tab.help')}</button>
             </div>
-
-            <div class="dropdown">
-                <button class="menu-btn" id="lbl-topbar-help">${t('topbar.help')}</button>
-                <div class="dropdown-content">
-                    <div class="dropdown-item" id="btn-guide">${t('topbar.help.guide')}</div>
-                    <div class="dropdown-item" id="btn-shortcuts">${t('topbar.help.shortcuts')}</div>
-                    <div class="dropdown-item" id="btn-patch">${t('topbar.help.patch')}</div>
-                    <div class="dropdown-item" id="btn-check-update">${t('topbar.help.update')}</div>
-                    <div class="dropdown-item" id="btn-credits">${t('topbar.help.credits')}</div>
-                </div>
-            </div>
-
-            <div style="width:1px; height:20px; background:var(--border-color); margin: 0 5px;"></div>
-
-            <div style="display:flex; flex-shrink:0; align-items:center; border:1px solid var(--border-color); border-radius:3px; overflow:hidden; box-shadow:var(--panel-shadow);">
-                <button id="btn-layout-normal" title="${t('layout.standard')}" style="padding:4px 8px; cursor:pointer; background:#2196F3; border:none; display:flex; align-items:center; justify-content:center; transition:background 0.2s;">
-                    <img src="${logoNormal}" style="height:14px; width:14px; filter:invert(1) brightness(2);">
-                </button>
-                <button id="btn-layout-comb" title="${t('layout.comb')}" style="padding:4px 8px; cursor:pointer; background:var(--bg-input); border:none; border-left:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; transition:background 0.2s;">
-                    <img src="${logoPeigne}" style="height:14px; width:14px;">
-                </button>
-                <button id="btn-layout-chrono" title="${t('layout.chrono')}" style="padding:4px 8px; cursor:pointer; background:var(--bg-input); border:none; border-left:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; transition:background 0.2s;">
-                    <img src="${logoChrono}" style="height:14px; width:14px;">
-                </button>
-            </div>
-
-            <div id="chrono-tools" style="display:none; align-items:center; gap:6px; margin-left:10px;">
-                <select id="chrono-axis-select" title="${t('chrono.axis.title')}" style="padding:3px 6px; font-size:12px; border-radius:3px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input); cursor:pointer;">
-                    <option value="linear">${t('chrono.axis.linear')}</option>
-                    <option value="sqrt">${t('chrono.axis.sqrt')}</option>
-                    <option value="log">${t('chrono.axis.log')}</option>
-                    <option value="rank">${t('chrono.axis.rank')}</option>
-                </select>
-                <button id="btn-chrono-bounds" title="${t('chrono.bounds.title')}" style="padding:4px 10px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:4px; font-size:12px; font-weight:bold; transition:all 0.2s; white-space:nowrap;">${t('chrono.bounds.period')}</button>
-                <button id="btn-chrono-lanes" title="${t('chrono.lanes.title')}" style="padding:4px 10px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:4px; font-size:12px; font-weight:bold; transition:all 0.2s; white-space:nowrap;">${t('chrono.lanes.faithful')}</button>
-            </div>
-
-            <button id="btn-toggle-abbrev" style="margin-left:15px; padding:4px 12px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:4px; font-size:12px; font-weight:bold; transition:all 0.2s;">Noms complets</button>
-            <button id="btn-toggle-ribbon" style="margin-left:10px; padding:4px 12px; cursor:pointer; background:rgba(33, 150, 243, 0.1); color:#2196F3; border:1px solid #2196F3; border-radius:4px; font-size:12px; font-weight:bold; transition:all 0.2s;">${t('topbar.btn.style')}</button>
 
             <div style="position:relative; margin-left:auto; display:flex; align-items:center; gap:10px;">
-                <button id="btn-settings" title="${t('settings.title')}" style="padding:4px 8px; cursor:pointer; background:var(--bg-input); border:1px solid var(--border-color); border-radius:4px; display:flex; align-items:center; justify-content:center; transition:background 0.2s; color:var(--text-main); font-size:16px;">
-                    &#9881;
-                </button>
                 <input type="text" id="search-input" placeholder="${t('search.placeholder')}" style="padding:4px 8px; width:180px; font-size:12px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input);">
                 <div id="search-dropdown" style="position:absolute; top:100%; right:0; width:100%; max-height:250px; overflow-y:auto; background:var(--bg-input); color:var(--text-input); border:1px solid var(--border-color); box-shadow:var(--panel-shadow); display:none; z-index:2000;"></div>
-                <input type="file" id="file-input" accept=".json,.phylo,.xmind" style="display:none;">
+                <input type="file" id="file-input" accept=".json,.phylo,.xmind,.nwk,.newick,.tre,.tree,.nex,.nexus,.tnt" style="display:none;">
             </div>
         </div>
 
-        <div id="style-ribbon" style="display:none; background:var(--bg-panel); padding:10px 20px; border-bottom:1px solid var(--border-color); gap:25px; align-items:flex-start; flex-wrap:wrap; font-size:12px; box-shadow:inset 0 4px 6px rgba(0,0,0,0.02);">
+        <div id="ribbon" class="ribbon" style="display:none;">
+        <div id="style-ribbon" class="ribbon-panel" data-panel="style" style="display:none;">
             
             <div class="ribbon-group">
                 <div class="ribbon-row">
@@ -144,8 +129,8 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                     <input type="number" id="style-size" style="padding:4px; width:50px; border:1px solid var(--border-color);" min="8" max="72" value="16">
                 </div>
                 <div class="ribbon-row" style="margin-top:6px;">
-                    <button id="style-bold" style="padding:4px 10px; font-weight:bold; cursor:pointer; background:var(--bg-input); color:var(--text-input); border:1px solid var(--border-color); border-radius:3px;">Gras</button>
-                    <button id="style-italic" style="padding:4px 10px; font-style:italic; cursor:pointer; background:var(--bg-input); color:var(--text-input); border:1px solid var(--border-color); border-radius:3px;">Italique</button>
+                    <button id="style-bold" style="padding:4px 10px; font-weight:bold; cursor:pointer; background:var(--bg-input); color:var(--text-input); border:1px solid var(--border-color); border-radius:3px;">${t('style.bold')}</button>
+                    <button id="style-italic" style="padding:4px 10px; font-style:italic; cursor:pointer; background:var(--bg-input); color:var(--text-input); border:1px solid var(--border-color); border-radius:3px;">${t('style.italic')}</button>
                 </div>
                 <div class="ribbon-group-title" id="lbl-style-text">${t('style.text')}</div>
             </div>
@@ -156,7 +141,7 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                     <input type="color" id="style-node-frame-color" value="#000000" style="width:100%; height:20px; padding:0; border:none; cursor:pointer;">
                     <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="style-text-above"> <span id="lbl-style-text-above">${t('style.text_above')}</span></label>
                 </div>
-                <div class="ribbon-group-title">Lignage</div>
+                <div class="ribbon-group-title" id="lbl-style-outline">${t('style.outline')}</div>
             </div>
 
             <div class="ribbon-group" id="style-box-section" style="display:none; border-right:2px dashed #2196F3;">
@@ -192,12 +177,167 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                 </div>
                 <div class="ribbon-group-title" id="lbl-style-picto">${t('style.picto')}</div>
             </div>
+            <div class="ribbon-group" id="style-highlight-section">
+                <div class="ribbon-row">
+                    <input type="color" id="style-highlight-color" value="#FFF176" style="width:30px; height:24px; padding:0; border:none; cursor:pointer;" title="${t('highlight.color')}">
+                    <button class="ribbon-btn" id="style-highlight-apply" title="${t('highlight.apply_title')}">${t('highlight.apply')}</button>
+                    <button class="ribbon-btn" id="style-highlight-clear" title="${t('highlight.clear')}">&#10006;</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-style-highlight">${t('highlight.group')}</div>
+            </div>
+            <div class="ribbon-group" id="style-brush-section">
+                <div class="ribbon-row">
+                    <input type="color" id="style-brush-color" value="#E53935" style="width:30px; height:24px; padding:0; border:none; cursor:pointer;" title="${t('brush.color')}">
+                    <select id="style-brush-width" style="padding:4px; border:1px solid var(--border-color);" title="${t('style.thickness')}">
+                        <option value="2">2 px</option><option value="3">3 px</option><option value="4" selected>4 px</option><option value="6">6 px</option>
+                    </select>
+                    <button class="ribbon-btn" id="style-brush-toggle" title="${t('brush.mode_title')}">&#128396; ${t('brush.mode')}</button>
+                </div>
+                <div class="ribbon-row" style="margin-top:6px;">
+                    <button class="ribbon-btn" id="style-brush-selection">${t('brush.paint_selection')}</button>
+                    <button class="ribbon-btn" id="style-brush-clear">${t('brush.clear')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-style-brush">${t('brush.group')}</div>
+            </div>
             
-            <button id="btn-close-ribbon" style="margin-left:auto; align-self:center; background:transparent; color:var(--text-main); border:none; cursor:pointer; font-size:18px; opacity:0.5; transition:opacity 0.2s;">&#10006;</button>
+        </div>
+
+        <div id="ribbon-display" class="ribbon-panel" data-panel="display" style="display:none;">
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="btn-recenter">${t('topbar.view.recenter')}</button>
+                    <button class="ribbon-btn" id="btn-center-root">${t('topbar.view.center_root')}</button>
+                </div>
+                <div class="ribbon-row" style="margin-top:6px;">
+                    <button class="ribbon-btn" id="btn-expand-all">${t('topbar.view.expand')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-camera">${t('ribbon.grp.camera')}</div>
+            </div>
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="btn-toggle-abbrev">Noms complets</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-names">${t('ribbon.grp.names')}</div>
+            </div>
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <select id="set-theme" style="padding:4px; font-size:12px;">
+                    <option value="museum">${t('theme.museum')}</option>
+                    <option value="light">${t('theme.light')}</option>
+                    <option value="dark">${t('theme.dark')}</option>
+                    <option value="sepia">${t('theme.sepia')}</option>
+                    <option value="ingen">${t('theme.ingen')}</option>
+                    <option value="console">${t('theme.console')}</option>
+                    <option value="high-contrast">${t('theme.highcontrast')}</option>
+                    <option value="dimmed">${t('theme.dimmed')}</option>
+                    </select>
+                </div>
+                <div class="ribbon-row" style="margin-top:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" id="set-canvas-bg"> <span id="lbl-settings-canvasbg">${t('settings.canvas_bg')}</span>
+                    </label>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-theme">${t('ribbon.grp.theme')}</div>
+            </div>
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="btn-settings" title="${t('settings.title')}">&#9881; ${t('ribbon.settings')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-settings">${t('ribbon.grp.settings')}</div>
+            </div>
+        </div>
+
+        <div id="ribbon-tree" class="ribbon-panel" data-panel="tree" style="display:none;">
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <div style="display:flex; flex-shrink:0; align-items:center; border:1px solid var(--border-color); border-radius:3px; overflow:hidden; box-shadow:var(--panel-shadow);">
+                    <button id="btn-layout-normal" title="${t('layout.standard')}" style="padding:4px 8px; cursor:pointer; background:#2196F3; border:none; display:flex; align-items:center; justify-content:center; transition:background 0.2s;">
+                    <img src="${logoNormal}" style="height:14px; width:14px; filter:invert(1) brightness(2);">
+                    </button>
+                    <button id="btn-layout-comb" title="${t('layout.comb')}" style="padding:4px 8px; cursor:pointer; background:var(--bg-input); border:none; border-left:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; transition:background 0.2s;">
+                    <img src="${logoPeigne}" style="height:14px; width:14px; filter:var(--layout-icon-filter, none);">
+                    </button>
+                    <button id="btn-layout-chrono" title="${t('layout.chrono')}" style="padding:4px 8px; cursor:pointer; background:var(--bg-input); border:none; border-left:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; transition:background 0.2s;">
+                    <img src="${logoChrono}" style="height:14px; width:14px; filter:var(--layout-icon-filter, none);">
+                    </button>
+                    </div>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-layout">${t('ribbon.grp.layout')}</div>
+            </div>
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="tree-divergence-toggle" title="${t('divergence.mode_title')}">&#8660; ${t('divergence.mode')}</button>
+                </div>
+                <div class="ribbon-row" style="margin-top:6px;">
+                    <button class="ribbon-btn" id="tree-divergence-reset" title="${t('divergence.reset_title')}">${t('divergence.reset')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-divergence">${t('divergence.group')}</div>
+            </div>
+            <div class="ribbon-group" id="chrono-tools" style="display:none;">
+                <div class="ribbon-row">
+                    <select id="chrono-axis-select" title="${t('chrono.axis.title')}" style="padding:3px 6px; font-size:12px; border-radius:3px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input); cursor:pointer;">
+                    <option value="linear">${t('chrono.axis.linear')}</option>
+                    <option value="sqrt">${t('chrono.axis.sqrt')}</option>
+                    <option value="log">${t('chrono.axis.log')}</option>
+                    <option value="rank">${t('chrono.axis.rank')}</option>
+                    </select>
+                    <button id="btn-chrono-bounds" title="${t('chrono.bounds.title')}" style="padding:4px 10px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:4px; font-size:12px; font-weight:bold; transition:all 0.2s; white-space:nowrap;">${t('chrono.bounds.period')}</button>
+                    <button class="ribbon-btn" id="btn-geo-chart-chrono" title="${t('geochart.button_title')}">${t('geochart.button')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-chrono">${t('ribbon.grp.chrono')}</div>
+            </div>
+            <div class="ribbon-group" id="romer-tools" style="display:none;">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="romer-toggle" title="${t('romer.title')}">&#10023; ${t('romer.toggle')}</button>
+                    <button class="ribbon-btn" id="romer-pick" title="${t('romer.pick_title')}">&#9998; ${t('romer.pick')}</button>
+                    <button class="ribbon-btn" id="romer-layout" title="${t('romer.layout_title')}">${t('romer.layout')} &#9662;</button>
+                </div>
+                <div class="ribbon-row" style="margin-top:6px;">
+                    <select id="romer-depth" title="${t('romer.depth_title')}" style="padding:3px 6px; font-size:12px; border-radius:3px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input);">
+                        <option value="1">${t('romer.depth')} 1</option><option value="2">${t('romer.depth')} 2</option><option value="3">${t('romer.depth')} 3</option><option value="0">${t('romer.depth_chosen')}</option>
+                    </select>
+                    <select id="romer-step" title="${t('romer.step_title')}" style="padding:3px 6px; font-size:12px; border-radius:3px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-input);">
+                        <option value="0">${t('romer.step_auto')}</option><option value="1">1 Ma</option><option value="5">5 Ma</option><option value="10">10 Ma</option><option value="25">25 Ma</option>
+                    </select>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-romer">${t('romer.group')}</div>
+            </div>
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="ribbon-graft" data-needs="one">${t('menu.graft')}</button>
+                    <button class="ribbon-btn" id="ribbon-sheet-new" data-needs="one">${t('menu.sheet_new')}</button>
+                </div>
+                <div class="ribbon-row" style="margin-top:6px;">
+                    <button class="ribbon-btn" id="ribbon-box-add" data-needs="some">${t('menu.box_add')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-selection">${t('ribbon.grp.selection')}</div>
+            </div>
+        </div>
+
+        <div id="ribbon-help" class="ribbon-panel" data-panel="help" style="display:none;">
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="btn-guide">${t('topbar.help.guide')}</button>
+                    <button class="ribbon-btn" id="btn-shortcuts">${t('topbar.help.shortcuts')}</button>
+                    <button class="ribbon-btn" id="btn-geo-chart" title="${t('geochart.button_title')}">${t('geochart.button')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-docs">${t('ribbon.grp.docs')}</div>
+            </div>
+            <div class="ribbon-group">
+                <div class="ribbon-row">
+                    <button class="ribbon-btn" id="btn-patch">${t('topbar.help.patch')}</button>
+                    <button class="ribbon-btn" id="btn-check-update">${t('topbar.help.update')}</button>
+                    <button class="ribbon-btn" id="btn-credits">${t('topbar.help.credits')}</button>
+                </div>
+                <div class="ribbon-group-title" id="lbl-ribbon-about">${t('ribbon.grp.about')}</div>
+            </div>
+        </div>
+
+        <button id="btn-collapse-ribbon" class="ribbon-collapse" title="${t('ribbon.collapse')}">&#9650;</button>
         </div>
     </div>
 
-    <div id="breadcrumbs-bar" style="position:absolute; top:45px; left:15px; z-index:1001; font-size:12px; background:var(--bg-panel); color:var(--text-main); padding:6px 12px; border:1px solid var(--border-color); box-shadow:var(--panel-shadow); display:flex; gap:8px; border-radius:var(--btn-radius); opacity:0.95;"></div>
+    <div id="breadcrumbs-bar" style="position:absolute; top:calc(var(--topbar-h, 36px) + 9px); left:15px; z-index:1001; font-size:12px; background:var(--bg-panel); color:var(--text-main); padding:6px 12px; border:1px solid var(--border-color); box-shadow:var(--panel-shadow); display:flex; gap:8px; border-radius:var(--btn-radius); opacity:0.95;"></div>
     
     <div id="sheets-bar" style="position:absolute; bottom:0; left:0; right:0; height:45px; background:var(--bg-panel); color:var(--text-main); border-top:1px solid var(--border-color); z-index:600; display:flex; align-items:center; padding:0 15px; gap:8px;"></div>
     <div id="counter-bar" style="position:absolute; bottom:6px; right:15px; z-index:1002; font-size:11px; background:var(--bg-topbar); color:var(--text-topbar); padding:4px 8px; border:1px solid var(--border-color); box-shadow:var(--panel-shadow); border-radius:var(--btn-radius); opacity:0.9; pointer-events:none; font-weight:bold;"></div>
@@ -222,28 +362,10 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
         <div class="settings-section">
             <h3 class="settings-title" id="lbl-settings-display" style="color:#2196F3;">${t('settings.sec_display')}</h3>
             <div class="settings-row">
-                <span id="lbl-settings-theme">${t('settings.theme')}</span>
-                <select id="set-theme" style="padding:4px; font-size:12px;">
-                    <option value="light">${t('theme.light')}</option>
-                    <option value="dark">${t('theme.dark')}</option>
-                    <option value="sepia">${t('theme.sepia')}</option>
-                    <option value="ingen">${t('theme.ingen')}</option>
-                    <option value="console">${t('theme.console')}</option>
-                    <option value="high-contrast">${t('theme.highcontrast')}</option>
-                    <option value="dimmed">${t('theme.dimmed')}</option>
-                </select>
-            </div>
-            <div class="settings-row">
                 <span id="lbl-settings-lang">${t('settings.lang')}</span>
                 <select id="set-lang" style="padding:4px; font-size:12px;">
-                    <option value="fr" ${currentLang === 'fr' ? 'selected' : ''}>Français</option>
-                    <option value="en" ${currentLang === 'en' ? 'selected' : ''}>English</option>
+                    ${LANGS.map(l => `<option value="${l}" ${currentLang === l ? 'selected' : ''}>${LANG_NAMES[l]}</option>`).join('')}
                 </select>
-            </div>
-            <div class="settings-row">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                    <input type="checkbox" id="set-canvas-bg"> <span id="lbl-settings-canvasbg">${t('settings.canvas_bg')}</span>
-                </label>
             </div>
             <div class="settings-row">
                 <span id="lbl-settings-wallpaper">Fond d'écran</span>
@@ -277,11 +399,6 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
             <div class="settings-row">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                     <input type="checkbox" id="set-smart-tax"> <span id="lbl-settings-smarttax">${t('settings.smart_tax')}</span>
-                </label>
-            </div>
-            <div class="settings-row">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                    <input type="checkbox" id="set-auto-genus-species"> <span id="lbl-settings-autogenusspecies">${t('settings.auto_genus_species')}</span>
                 </label>
             </div>
             <div class="settings-row">
@@ -331,21 +448,34 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
         </div>
     </div>
 
-    <div id="side-panel" style="position:absolute; top:36px; right:0; width:400px; height:calc(100vh - 36px); background:var(--bg-panel); color:var(--text-main); border-left:1px solid var(--border-color); padding:20px; box-shadow:-2px 0 10px rgba(0,0,0,0.1); display:block; transform:translateX(100%); z-index:1200; box-sizing:border-box; overflow-y:auto; transition:transform 0.3s ease-in-out; font-size:14px;">
+    <div id="side-panel" style="position:absolute; top:var(--topbar-h, 36px); right:0; width:400px; height:calc(100vh - var(--topbar-h, 36px)); background:var(--bg-panel); color:var(--text-main); border-left:1px solid var(--border-color); padding:20px; box-shadow:-2px 0 10px rgba(0,0,0,0.1); display:block; transform:translateX(100%); z-index:1200; box-sizing:border-box; overflow-y:auto; transition:transform 0.3s ease-in-out; font-size:14px;">
         <span id="btn-close-cross" style="position:absolute; top:15px; right:20px; cursor:pointer; font-size:16px; color:var(--text-main); font-weight:bold; line-height:1; opacity:0.7;">&#10006;</span>
-        <h2 id="panel-title" style="margin-top:0; margin-right:30px; font-family:serif; border-bottom:2px solid var(--border-color); padding-bottom:10px;"></h2>
+        <div id="fiche-nav" style="position:absolute; top:10px; right:46px; display:flex; gap:4px;"><button id="fiche-prev" class="fiche-nav-btn" title="${t('fiche.prev')}" style="width:28px; height:24px; padding:0; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--btn-radius); font-size:15px; line-height:1;">&#8592;</button><button id="fiche-next" class="fiche-nav-btn" title="${t('fiche.next')}" style="width:28px; height:24px; padding:0; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--btn-radius); font-size:15px; line-height:1;">&#8594;</button></div>
+        <h2 id="panel-title" style="margin-top:0; margin-right:110px; font-family:serif; border-bottom:2px solid var(--border-color); padding-bottom:10px;"></h2>
         <div id="panel-subtitle-synonym" style="display:none; cursor:pointer; color:#2196F3; font-style:italic; margin-bottom:15px; font-size:14px; font-weight:bold;" title="${t('title.go_to_valid')}"></div>
+        <div id="sheet-classification" style="display:none; margin-bottom:15px; padding:8px 10px; border:1px solid #2196F3; border-radius:var(--btn-radius); background:rgba(33, 150, 243, 0.06);">
+            <label id="lbl-sheet-classification" style="display:block; font-weight:bold; font-size:13px; margin-bottom:5px; color:#2196F3;">${t('variant.title')}</label>
+            <div style="display:flex; gap:5px;">
+                <select id="sheet-variant-select" style="flex:1; padding:5px; font-size:13px; cursor:pointer;"></select>
+                <input type="text" id="sheet-variant-name" style="flex:1; padding:5px; font-size:13px; display:none;">
+                <button id="sheet-variant-rename" title="${t('variant.rename')}" style="padding:5px 8px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--btn-radius); font-size:12px;">&#9998;</button>
+                <button id="sheet-variant-delete" title="${t('variant.delete')}" style="padding:5px 8px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--btn-radius); font-size:12px; color:#d32f2f;">&#10006;</button>
+            </div>
+            <button id="sheet-variant-add" style="padding:5px 8px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--btn-radius); font-size:12px; width:100%; margin-top:6px; font-weight:bold;">+ ${t('variant.add')}</button>
+            <div id="sheet-variant-warning" style="display:none; font-size:11px; color:#e65100; margin-top:5px;"></div>
+            <div id="lbl-sheet-variant-note" style="font-size:11px; opacity:0.75; margin-top:5px;">${t('variant.note')}</div>
+        </div>
         
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-status" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.status')} :</label>
+            <label id="lbl-side-status" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.status')}${colonSep()}</label>
             <select id="inp-status" style="width:100%; padding:6px; box-sizing:border-box; cursor:pointer; font-size:13px;">${statusOptions}</select>
         </div>
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-rank" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.rank')} :</label>
+            <label id="lbl-side-rank" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.rank')}${colonSep()}</label>
             <select id="inp-rank" style="width:100%; padding:6px; box-sizing:border-box; cursor:pointer; font-size:13px;">${rankOptions}</select>
         </div>
         <div id="container-synonym" style="margin-bottom: 12px; flex-direction:column; position:relative; display:none;">
-            <label id="lbl-side-synonym" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.synonym_of')} :</label>
+            <label id="lbl-side-synonym" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.synonym_of')}${colonSep()}</label>
             <div style="display:flex; align-items:center;">
                 <span style="margin-right:5px; font-weight:bold; color:var(--text-main);"> = </span>
                 <input type="text" id="inp-synonymTarget" autocomplete="off" placeholder="${t('placeholder.synonym_target')}" style="width:100%; padding:6px; box-sizing:border-box; font-size:13px;">
@@ -353,27 +483,27 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
             <div id="synonym-dropdown" style="position:absolute; top:100%; left:15px; right:0; max-height:150px; overflow-y:auto; background:var(--bg-input); color:var(--text-input); border:1px solid var(--border-color); box-shadow:var(--panel-shadow); display:none; z-index:2000;"></div>
         </div>
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-date" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.date')} :</label>
+            <label id="lbl-side-date" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.date')}${colonSep()}</label>
             <input type="text" id="inp-discoveryDate" style="width:100%; padding:6px; box-sizing:border-box; font-size:13px;">
         </div>
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-author" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.author')} :</label>
+            <label id="lbl-side-author" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.author')}${colonSep()}</label>
             <input type="text" id="inp-author" style="width:100%; padding:6px; box-sizing:border-box; font-size:13px;">
         </div>
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-dist" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.dist')} :</label>
+            <label id="lbl-side-dist" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.dist')}${colonSep()}</label>
             <input type="text" id="inp-distribution" style="width:100%; padding:6px; box-sizing:border-box; font-size:13px;">
         </div>
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-size" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.size')} :</label>
+            <label id="lbl-side-size" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.size')}${colonSep()}</label>
             <input type="text" id="inp-size" style="width:100%; padding:6px; box-sizing:border-box; font-size:13px;">
         </div>
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-mass" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.mass')} :</label>
+            <label id="lbl-side-mass" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.mass')}${colonSep()}</label>
             <input type="text" id="inp-mass" style="width:100%; padding:6px; box-sizing:border-box; font-size:13px;">
         </div>
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-period" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.period')} :</label>
+            <label id="lbl-side-period" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.period')}${colonSep()}</label>
             <input type="text" id="inp-period" placeholder="${t('placeholder.period')}" style="width:100%; padding:6px; box-sizing:border-box; font-size:13px;">
         </div>
         
@@ -393,12 +523,12 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
         </div>
 
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-synapo" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.synapo')} :</label>
+            <label id="lbl-side-synapo" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.synapo')}${colonSep()}</label>
             <textarea id="inp-synapomorphies" spellcheck="true" placeholder="${t('placeholder.synapo')}" style="width:100%; height:120px; resize:vertical; padding:6px; box-sizing:border-box; font-size:13px;"></textarea>
         </div>
 
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-notes" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.notes')} :</label>
+            <label id="lbl-side-notes" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.notes')}${colonSep()}</label>
             <textarea id="inp-notes" spellcheck="true" style="width:100%; height:120px; resize:vertical; padding:6px; box-sizing:border-box; font-size:13px;"></textarea>
         </div>
 
@@ -408,7 +538,7 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
         </div>
 
         <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
-            <label id="lbl-side-iucn" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.iucn')} :</label>
+            <label id="lbl-side-iucn" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('label.iucn')}${colonSep()}</label>
             <select id="inp-iucn" style="width:100%; padding:6px; box-sizing:border-box; cursor:pointer; font-size:13px;">
                 <option value=""></option>
                 <option value="NE (Non évalué)">${t('iucn.ne')}</option>
@@ -443,7 +573,20 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
                 <button id="btn-clear-sheetImage" style="padding:6px; cursor:pointer; background:var(--bg-input); color:#d32f2f; border:1px solid #d32f2f; border-radius:var(--btn-radius); display:none;">${t('btn.delete_illus')}</button>
             </div>
             <img id="preview-sheetImage" style="max-width:100%; max-height:200px; object-fit:contain; border-radius:4px; display:none; border:1px solid var(--border-color); background:rgba(0,0,0,0.05);" />
+            <label id="lbl-img-credits" for="inp-imgCredits" style="font-size:11px; margin-top:6px; opacity:0.8; display:none;">${t('label.img_credits')}</label>
             <input type="text" id="inp-imgCredits" placeholder="${t('placeholder.img_credits')}" style="width:100%; padding:6px; box-sizing:border-box; font-size:11px; margin-top:5px; display:none;">
+            <div id="fiche-gallery" style="display:none; gap:4px; flex-wrap:wrap; margin-top:6px;"></div>
+            <button id="btn-image-main" style="display:none; margin-top:5px; padding:4px 8px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--btn-radius); font-size:12px;">&#9733; ${t('media.make_main')}</button>
+        </div>
+
+        <div style="margin-bottom: 12px; display:flex; flex-direction:column;">
+            <label id="lbl-side-audio" style="font-weight:bold; font-size:13px; margin-bottom:4px; opacity:0.9;">${t('media.audio')}</label>
+            <div style="display:flex; gap:5px;">
+                <button id="btn-audio-pick" title="${t('media.audio_pick_title')}" style="flex:1; padding:6px; cursor:pointer; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--btn-radius); font-size:12px;">&#128266; ${t('media.audio_pick')}</button>
+                <button id="btn-audio-clear" title="${t('media.audio_clear')}" style="padding:6px 10px; cursor:pointer; background:var(--bg-input); color:#d32f2f; border:1px solid #d32f2f; border-radius:var(--btn-radius); display:none;">&#10006;</button>
+            </div>
+            <div id="audio-info" style="font-size:11px; opacity:0.85; margin-top:4px; word-break:break-all;"></div>
+            <audio id="audio-player" controls style="width:100%; margin-top:4px; display:none;"></audio>
         </div>
         
         <div id="lineage-container" style="margin-top:15px; padding:10px; background:var(--bg-canvas); border:1px solid var(--border-color); border-radius:4px; font-size:12px; line-height:1.4;"></div>
@@ -471,21 +614,20 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       const layerDeep = document.getElementById('timeline-layer-deep');
 
       GEOLOGICAL_PERIODS.forEach(p => { 
-          const pctWidth = ((p.start - p.end) / 600) * 100; 
-          const pctLeft = ((600 - p.start) / 600) * 100; 
-          const block = document.createElement('div'); 
-          block.style.cssText = `position:absolute; left:${pctLeft}%; width:${pctWidth}%; top:0; bottom:0; background-color:${p.color}; border-right:1px solid rgba(0,0,0,0.2); box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:10px; color:rgba(0,0,0,0.8); overflow:hidden; cursor:help;`; 
-          block.title = `${p.name} (${p.start} - ${p.end} Ma)`; block.innerText = p.abbr; 
-          layerNormal?.appendChild(block); 
+          const pctWidth = ((p.start - p.end) / PHANEROZOIC_TIMELINE_MAX) * 100;
+          const pctLeft = ((PHANEROZOIC_TIMELINE_MAX - p.start) / PHANEROZOIC_TIMELINE_MAX) * 100;
+          const block = document.createElement('div');
+          block.style.cssText = `position:absolute; left:${pctLeft}%; width:${pctWidth}%; top:0; bottom:0; background-color:${p.color}; border-right:1px solid rgba(0,0,0,0.2); box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:10px; color:rgba(0,0,0,0.8); overflow:hidden; cursor:help;`;
+          block.title = `${t(p.key)} (${p.start} - ${p.end} Ma)`; block.innerText = p.abbr;
+          layerNormal?.appendChild(block);
       });
 
-      const { PRECAMBRIAN_EONS } = require('./utils'); 
-      PRECAMBRIAN_EONS.forEach((e: any) => {
-          const pctWidth = ((e.start - e.end) / 4500) * 100;
-          const pctLeft = ((4500 - e.start) / 4500) * 100;
+      PRECAMBRIAN_EONS.forEach(e => {
+          const pctWidth = ((e.start - e.end) / EARTH_AGE) * 100;
+          const pctLeft = ((EARTH_AGE - e.start) / EARTH_AGE) * 100;
           const block = document.createElement('div');
           block.style.cssText = `position:absolute; left:${pctLeft}%; width:${pctWidth}%; top:0; bottom:0; background-color:${e.color}; border-right:1px solid rgba(0,0,0,0.2); box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:10px; color:rgba(255,255,255,0.9); overflow:hidden; cursor:help; font-weight:bold;`;
-          block.title = `${e.name} (${e.start} - ${e.end} Ma)`; block.innerText = e.abbr;
+          block.title = `${t(e.key)} (${e.start} - ${e.end} Ma)`; block.innerText = e.abbr;
           layerDeep?.appendChild(block);
       });
   }
@@ -499,10 +641,12 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
   });
 
   return {
-      btnStart: document.getElementById('btn-start') as HTMLButtonElement,
+      // Logos des trois dispositions (hub d'accueil : modèles et projets récents sans miniature).
+      logoStandard: logoNormal, logoComb: logoPeigne, logoChrono,
       welcomeOverlay: document.getElementById('welcome-overlay') as HTMLElement,
       btnSave: document.getElementById('btn-save') as HTMLElement, 
-      btnSaveAs: document.getElementById('btn-save-as') as HTMLElement, 
+      btnSaveAs: document.getElementById('btn-save-as') as HTMLElement,
+      btnSaveLegacy: document.getElementById('btn-save-legacy') as HTMLElement,
       btnLoad: document.getElementById('btn-load') as HTMLElement, 
       fileInput: document.getElementById('file-input') as HTMLInputElement,
       btnRecenter: document.getElementById('btn-recenter') as HTMLElement, 
@@ -514,7 +658,6 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       btnLayoutChrono: document.getElementById('btn-layout-chrono') as HTMLButtonElement,
       chronoTools: document.getElementById('chrono-tools') as HTMLElement,
       chronoAxisSelect: document.getElementById('chrono-axis-select') as HTMLSelectElement,
-      btnChronoLanes: document.getElementById('btn-chrono-lanes') as HTMLButtonElement,
       btnChronoBounds: document.getElementById('btn-chrono-bounds') as HTMLButtonElement,
       btnCredits: document.getElementById('btn-credits') as HTMLElement, 
       creditsOverlay: document.getElementById('credits-overlay') as HTMLElement,
@@ -579,7 +722,6 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       btnCheckUpdate: document.getElementById('btn-check-update') as HTMLElement,
       setLayout: document.getElementById('set-layout') as HTMLSelectElement,
       setSmartTax: document.getElementById('set-smart-tax') as HTMLInputElement,
-      setAutoGenusSpecies: document.getElementById('set-auto-genus-species') as HTMLInputElement,
       setAutoItalic: document.getElementById('set-auto-italic') as HTMLInputElement,
       setZoomSens: document.getElementById('set-zoom-sens') as HTMLInputElement,
       setFicheColor: document.getElementById('set-fiche-color') as HTMLInputElement,
@@ -587,7 +729,7 @@ export const initUI = (logoPT: string, logoNormal: string, logoPeigne: string, l
       setIndicatorFiche: document.getElementById('set-indicator-fiche') as HTMLInputElement,
       btnClearHistory: document.getElementById('btn-clear-history') as HTMLButtonElement,
       btnResetSettings: document.getElementById('btn-reset-settings') as HTMLButtonElement,
-      btnToggleRibbon: document.getElementById('btn-toggle-ribbon') as HTMLButtonElement,
+      ribbon: document.getElementById('ribbon') as HTMLElement,
       btnToggleAbbrev: document.getElementById('btn-toggle-abbrev') as HTMLButtonElement,
       setCountInvalid: document.getElementById('set-count-invalid') as HTMLInputElement,
       setWallpaperFile: document.getElementById('set-wallpaper-file') as HTMLInputElement,
@@ -616,30 +758,67 @@ export const updateAllUITexts = (ui: any) => {
     el('btn-load', t('topbar.file.open'));
     el('btn-save', t('topbar.file.save'));
     el('btn-save-as', t('topbar.file.saveas'));
+    el('btn-save-legacy', t('topbar.file.save_legacy'));
     el('lbl-topbar-export', t('topbar.file.export'));
     
-    el('lbl-topbar-view', t('topbar.view'));
+    // Onglets et groupes du ruban (phase 2)
+    el('tab-style', t('tab.style'));
+    el('tab-display', t('tab.display'));
+    el('tab-tree', t('tab.tree'));
+    el('tab-help', t('tab.help'));
+    const collapse = document.getElementById('btn-collapse-ribbon');
+    if (collapse) collapse.title = t('ribbon.collapse');
+    el('lbl-ribbon-camera', t('ribbon.grp.camera'));
+    el('lbl-ribbon-names', t('ribbon.grp.names'));
+    el('lbl-ribbon-theme', t('ribbon.grp.theme'));
+    el('lbl-ribbon-settings', t('ribbon.grp.settings'));
+    el('lbl-ribbon-layout', t('ribbon.grp.layout'));
+    el('lbl-ribbon-chrono', t('ribbon.grp.chrono'));
+    el('lbl-ribbon-selection', t('ribbon.grp.selection'));
+    el('lbl-ribbon-docs', t('ribbon.grp.docs'));
+    el('lbl-ribbon-about', t('ribbon.grp.about'));
+    el('ribbon-graft', t('menu.graft'));
+    el('ribbon-sheet-new', t('menu.sheet_new'));
+    el('ribbon-box-add', t('menu.box_add'));
+    el('style-bold', t('style.bold'));
+    el('style-italic', t('style.italic'));
+    el('lbl-style-outline', t('style.outline'));
+    el('lbl-ribbon-divergence', t('divergence.group'));
+    el('lbl-ribbon-romer', t('romer.group'));
+    el('romer-toggle', '&#10023; ' + t('romer.toggle'));
+    el('romer-pick', '&#9998; ' + t('romer.pick'));
+    el('romer-layout', t('romer.layout') + ' &#9662;');
+    const romerLayoutBtn = document.getElementById('romer-layout'); if (romerLayoutBtn) romerLayoutBtn.title = t('romer.layout_title');
+    el('btn-geo-chart', t('geochart.button'));
+    el('btn-geo-chart-chrono', t('geochart.button'));
+    el('tree-divergence-toggle', '&#8660; ' + t('divergence.mode'));
+    el('tree-divergence-reset', t('divergence.reset'));
+    el('lbl-style-highlight', t('highlight.group'));
+    el('style-highlight-apply', t('highlight.apply'));
+    el('lbl-style-brush', t('brush.group'));
+    el('style-brush-toggle', '&#128396; ' + t('brush.mode'));
+    el('style-brush-selection', t('brush.paint_selection'));
+    el('style-brush-clear', t('brush.clear'));
+
     el('btn-recenter', t('topbar.view.recenter'));
     el('btn-center-root', t('topbar.view.center_root'));
     el('btn-expand-all', t('topbar.view.expand'));
-    
-    el('lbl-topbar-help', t('topbar.help'));
+
     el('btn-guide', t('topbar.help.guide'));
     el('btn-shortcuts', t('topbar.help.shortcuts'));
     el('btn-patch', t('topbar.help.patch'));
     el('btn-check-update', t('topbar.help.update'));
     el('lbl-settings-autoupdate', t('settings.auto_update'));
     el('btn-credits', t('topbar.help.credits'));
-    
-    el('btn-toggle-ribbon', t('topbar.btn.style'));
-    el('btn-settings', '&#9881;');
 
-    el('lbl-side-diagnose', t('label.diagnose') + ' :');
-    el('lbl-side-biblio', t('label.biblio') + ' :');
+    el('btn-settings', '&#9881; ' + t('ribbon.settings'));
+
+    el('lbl-side-diagnose', t('label.diagnose') + colonSep());
+    el('lbl-side-biblio', t('label.biblio') + colonSep());
     pl('inp-diagnose', t('placeholder.diagnose'));
     pl('inp-biblio', t('placeholder.biblio'));
 
-    el('lbl-side-synonym', t('label.synonym_of') + ' :');
+    el('lbl-side-synonym', t('label.synonym_of') + colonSep());
     pl('inp-synonymTarget', t('placeholder.synonym_target'));
     const subSyn = document.getElementById('panel-subtitle-synonym');
     if(subSyn) subSyn.title = t('title.go_to_valid');
@@ -652,35 +831,44 @@ export const updateAllUITexts = (ui: any) => {
     
     if (ui.btnLayoutNormal) ui.btnLayoutNormal.title = t('layout.standard');
     if (ui.btnLayoutComb) ui.btnLayoutComb.title = t('layout.comb');
+    const fichePrev = document.getElementById('fiche-prev'), ficheNext = document.getElementById('fiche-next');
+    if (fichePrev) fichePrev.title = t('fiche.prev');
+    if (ficheNext) ficheNext.title = t('fiche.next');
     if (ui.btnToggleAbbrev) ui.btnToggleAbbrev.title = t('topbar.btn.abbrev');
 
     // Accueil
-    const subtitle = document.querySelector('#welcome-overlay p');
-    if (subtitle) subtitle.innerHTML = t('welcome.subtitle');
-    el('btn-start', t('welcome.new_project'));
-    const tip = document.querySelector('#welcome-overlay i');
-    if (tip) tip.innerHTML = t('welcome.tip');
-    const recentTitle = document.querySelector('#recent-files-container div');
-    if (recentTitle) recentTitle.innerHTML = t('welcome.recent');
+    // Hub d'accueil (identifiants précis : le hub contient plusieurs <p> et <div>)
+    el('hub-subtitle', t('welcome.subtitle'));
+    el('hub-tip', t('welcome.tip'));
+    el('hub-recent-title', t('welcome.recent'));
+    el('hub-recent-empty', t('hub.recent_empty'));
+    el('btn-hub', t('hub.menu'));
     
     // Panneau Latéral
-    el('lbl-side-status', t('label.status') + ' :');
-    el('lbl-side-rank', t('label.rank') + ' :');
-    el('lbl-side-date', t('label.date') + ' :');
-    el('lbl-side-author', t('label.author') + ' :');
-    el('lbl-side-dist', t('label.dist') + ' :');
-    el('lbl-side-size', t('label.size') + ' :');
-    el('lbl-side-mass', t('label.mass') + ' :');
-    el('lbl-side-period', t('label.period') + ' :');
-    el('lbl-side-synapo', t('label.synapo') + ' :');
-    el('lbl-side-notes', t('label.notes') + ' :');
-    el('lbl-side-iucn', t('label.iucn') + ' :');
+    el('lbl-side-status', t('label.status') + colonSep());
+    el('lbl-side-rank', t('label.rank') + colonSep());
+    el('lbl-side-date', t('label.date') + colonSep());
+    el('lbl-side-author', t('label.author') + colonSep());
+    el('lbl-side-dist', t('label.dist') + colonSep());
+    el('lbl-side-size', t('label.size') + colonSep());
+    el('lbl-side-mass', t('label.mass') + colonSep());
+    el('lbl-side-period', t('label.period') + colonSep());
+    el('lbl-side-synapo', t('label.synapo') + colonSep());
+    el('lbl-side-notes', t('label.notes') + colonSep());
+    el('lbl-side-iucn', t('label.iucn') + colonSep());
     el('lbl-side-illus', t('label.illustration'));
     
     el('btn-export-fiche', t('sidepanel.export'));
     el('btn-close-panel', t('btn.close'));
     el('btn-upload-sheetImage', t('btn.upload_illus'));
     el('btn-clear-sheetImage', t('btn.delete_illus'));
+    el('btn-image-main', '&#9733; ' + t('media.make_main'));
+    el('lbl-side-audio', t('media.audio'));
+    el('lbl-img-credits', t('label.img_credits'));
+    el('lbl-sheet-classification', t('variant.title'));
+    el('sheet-variant-add', '+ ' + t('variant.add'));
+    el('lbl-sheet-variant-note', t('variant.note'));
+    el('btn-audio-pick', '&#128266; ' + t('media.audio_pick'));
     
     pl('inp-period', t('placeholder.period'));
     pl('inp-synapomorphies', t('placeholder.synapo'));
@@ -722,7 +910,6 @@ export const updateAllUITexts = (ui: any) => {
     el('btn-clear-history', t('settings.clear_history'));
     el('btn-reset-settings', t('settings.reset_settings'));
     el('lbl-settings-fiche-indicator', t('settings.fiche_indicator'));
-    el('lbl-settings-autogenusspecies', t('settings.auto_genus_species') !== 'settings.auto_genus_species' ? t('settings.auto_genus_species') : 'Auto Genre/Espèce');
     
     // Select options : on force le re-render des options pour la traduction
     if(ui.setTheme) {

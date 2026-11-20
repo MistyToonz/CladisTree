@@ -1,26 +1,53 @@
 declare global {
   interface Window {
     electronAPI: {
-      saveFile: (data: string, filePath?: string) => Promise<{ success: boolean, canceled?: boolean, filePath?: string, error?: string }>;
+      saveFile: (data: string, filePath?: string, defaultName?: string) => Promise<{ success: boolean, canceled?: boolean, filePath?: string, error?: string }>;
       openFile: () => Promise<{ success: boolean, canceled?: boolean, filePath?: string, fileName?: string, data?: Uint8Array, error?: string }>;
       onOpenFileFromOS: (callback: (filePath: string) => void) => void;
       readFileDirect: (filePath: string) => Promise<{ success: boolean, filePath?: string, fileName?: string, data?: Uint8Array, error?: string }>;
       saveExport: (data: string, defaultName: string, ext: string) => Promise<{ success: boolean, canceled?: boolean, filePath?: string, error?: string }>;
       openNewInstance: () => void;
+      pickAudio: () => Promise<{ success: boolean, canceled?: boolean, filePath?: string, fileName?: string }>;
+      writeTreeClipboard: (newick: string, json: string) => Promise<{ success: boolean }>;
+      readTreeClipboard: () => Promise<{ json: string | null, text: string }>;
       appVersion: string;
       checkForUpdate: () => Promise<{ success: boolean, version?: string, url?: string, name?: string, publishedAt?: string, status?: number, error?: string }>;
       openExternal: (url: string) => Promise<{ success: boolean, error?: string }>;
     }
   }
 }
+// En PREMIER : l'écran de chargement s'affiche pendant que le reste du code se charge (phase 4).
+import { bootDone } from './loading';
 import cytoscape from 'cytoscape';
-import { unzipSync, strFromU8, zipSync, strToU8 } from 'fflate';
 import svg from 'cytoscape-svg';
-import { jsPDF } from 'jspdf';
-import { saveExcelFile, exportGraphToPdf, generateFichePdf, XlsxCol } from './export';
-import { GEO_DETAILS, CHRONO_PERIOD_KEYS, adjustColorLightness } from './chrono-data';
+import { saveExcelFile } from './export';
+import { GEO_DETAILS, CHRONO_PERIOD_KEYS, stagesOf, adjustColorLightness } from './chrono-data';
 import { state, stateManager } from './graph-state';
-import { LayoutEngine } from './layout-engine';
+import { LayoutEngine, MIN_BRANCH_OFFSET, CHRONO_STYLE_SCRATCH, TAXI_TURN, normalizeAbbrev } from './layout-engine';
+import { chronoAgeToX as axisAgeToX, ChronoAxisMode, ChronoBoundsMode, hasScaleBreak, SCALE_BREAK_AGE, PRECAMBRIAN_COMPRESSION } from './chrono-axis';
+import { getImagePlacements } from './export-images';
+import { toAssetRef } from './asset-store';
+import { isTreeRoot, findTreeRootId } from './tree-utils';
+
+// Modules extraits de renderer.ts (phase 0.2) ; ils reçoivent le contexte partagé `ctx` (app-context.ts).
+import type { AppContext } from './app-context';
+import { initClipboard } from './clipboard';
+import { initFileIO } from './file-io';
+import { initInteractions } from './interactions';
+import { initKeyboard } from './keyboard';
+import { initGraphExport } from './graph-export';
+import { initSidePanel } from './side-panel';
+import { initRibbon } from './ribbon';
+import { initAnnotations, reapplyAnnotationStyles, refreshBranchPaint } from './annotations';
+import { initDivergenceDrag } from './divergence-drag';
+import { initFicheNav } from './fiche-nav';
+import { initFicheMedia } from './fiche-media';
+import { initSheetClassifications } from './classifications-ui';
+import { initRomerUI, planRomer, drawRomer, romerReserve, sameReserve, removeRomer, romerSettings, RomerReserve } from './romer';
+import { initHub } from './hub';
+import { enlargeEmptyNodeHitbox } from './hitbox';
+import { initGeoChart } from './geo-chart';
+import { refreshBrandMedia } from './brand';
 
 // @ts-ignore
 import logoPT from './PT.png';
@@ -33,7 +60,7 @@ import logoChrono from './Logo_chrono.png';
 import { EMPTY_DATA } from './config';
 import { measureTextWidth, getImageRatio } from './utils';
 import { initUI } from './ui';
-import { t, setLang, currentLang, Lang } from './i18n';
+import { t, setLang, currentLang, Lang, colonSep } from './i18n';
 
 cytoscape.use(svg);
 
@@ -57,130 +84,10 @@ if (window.electronAPI && window.electronAPI.onOpenFileFromOS) {
 const startApp = () => {
   const container = document.getElementById('app') as HTMLElement; 
   if (!container) return;
-
-  let isBoxSelecting = false; 
-  let isMiddlePanning = false;
   let isFittingCamera = false; 
-  let boxStartX = 0, boxStartY = 0;
-  let currentMouseX = 0, currentMouseY = 0;
-  let autoPanId: number | null = null;
-  let draggedNode: any = null;
-  let ghostEdge: any = null;
-  let currentDragTarget: any = null;
-  let possibleTargets: any[] = []; 
-  let currentParentId: string | null = null; 
-  let draggedDescendants: { node: any, dx: number, dy: number }[] = []; 
   let isEditing = false;
   let editedNode: any = null; 
-  let closeCurrentEditor: (() => void) | null = null; 
-  let sidePanelTimeout: ReturnType<typeof setTimeout>;
-  let panelTimeout: ReturnType<typeof setTimeout>;
-
-  function closeSidePanel() { 
-      ui.sidePanel.style.transform = 'translateX(100%)'; 
-      const vScroll = document.getElementById('custom-vscroll');
-      const hScroll = document.getElementById('custom-hscroll');
-      if (vScroll) vScroll.style.right = '0px';
-      if (hScroll) hScroll.style.right = '15px';
-  }
-
-  function openSidePanelForNode(node: any) {
-      state.activeNode = node; 
-      const isBox = node.hasClass('box');
-      const rawName = node.data('name'); 
-      const displayName = (!rawName || rawName.trim() === '') ? (isBox ? t('default.box') : t('default.unnamed_branch')) : rawName; 
-      const extinctMark = node.data('extinct') && !isBox && displayName !== t('default.unnamed_branch') ? '\u2020 ' : ''; 
-      
-      ui.panelTitle.innerText = extinctMark + displayName;
-
-      if (node.data('status') === 'Synonyme') {
-          ui.containerSynonym.style.display = 'flex';
-      } else {
-          ui.containerSynonym.style.display = 'none';
-      }
-
-      const synId = node.data('synonymTargetId');
-      if (synId) {
-          const targetNode = cy.$id(synId);
-          if (targetNode.length > 0) {
-              const targetName = LayoutEngine.getDynamicNodeName(targetNode, state, 'full');
-              ui.panelSubtitleSynonym.innerHTML = '= ' + targetName;
-              ui.panelSubtitleSynonym.style.display = 'block';
-              ui.inpSynonymTarget.value = targetNode.data('name') || '';
-          } else {
-              ui.panelSubtitleSynonym.style.display = 'none';
-              ui.inpSynonymTarget.value = '';
-          }
-      } else {
-          ui.panelSubtitleSynonym.style.display = 'none';
-          ui.inpSynonymTarget.value = '';
-      }
-      
-      Object.keys(ui.formInputs).forEach(key => { (ui.formInputs as any)[key].value = node.data(key) || ""; }); 
-      updateTimeline((ui.formInputs as any)['period'].value as string); 
-      
-      const sheetImg = node.data('sheetImage');
-      const creditsField = document.getElementById('inp-imgCredits'); 
-      
-      if (sheetImg) {
-          ui.previewSheetImage.src = sheetImg;
-          ui.previewSheetImage.style.display = 'block';
-          ui.btnClearSheetImage.style.display = 'block';
-          if (creditsField) creditsField.style.display = 'block';
-      } else {
-          ui.previewSheetImage.src = '';
-          ui.previewSheetImage.style.display = 'none';
-          ui.btnClearSheetImage.style.display = 'none';
-          if (creditsField) creditsField.style.display = 'none';
-      }
-      
-      if (isBox) {
-          ui.lineageContainer.style.display = 'none';
-      } else {
-          ui.lineageContainer.style.display = 'block';
-          ui.lineageContainer.innerHTML = `<strong>${t('label.lineage')}</strong><br><span style="color:var(--text-main); opacity:0.7;">${buildLineageString(node)}</span>`;
-      }
-      
-      const linkedName = node.data('linkedFileName');
-      if (linkedName) {
-          ui.inpLinkedFileName.value = linkedName;
-          ui.btnOpenLinkedFile.style.display = 'block';
-          ui.btnClearLinkedFile.style.display = 'block';
-      } else {
-          ui.inpLinkedFileName.value = '';
-          ui.btnOpenLinkedFile.style.display = 'none';
-          ui.btnClearLinkedFile.style.display = 'none';
-      }
-
-      ui.sidePanel.style.transform = 'translateX(0)';
-
-      const vScroll = document.getElementById('custom-vscroll');
-      const hScroll = document.getElementById('custom-hscroll');
-      if (vScroll) vScroll.style.right = '400px';
-      if (hScroll) hScroll.style.right = '415px'; 
-  }
-
-  function buildLineageString(node: any, full: boolean = false) {
-    let path: string[] = []; let curr: any = node;
-    while (curr && curr.length > 0) { 
-      if (!curr.hasClass('box')) { 
-        const d = curr.data(); 
-        if (d.name && d.name.trim() !== '') {
-            let name = (d.extinct ? '\u2020 ' : '') + d.name; 
-            if (d.isItalic) name = `<i>${name}</i>`; 
-            path.unshift(name); 
-        }
-      } 
-      curr = curr.incomers('node').first(); 
-    }
-    
-    if (!full && path.length > 4) {
-        const fullText = path.join(' > ').replace(/<[^>]+>/g, '').replace(/"/g, '&quot;');
-        return `${path[0]} > <span title="${fullText}" style="cursor:help; font-weight:bold; letter-spacing:2px; color:#2196F3;">...</span> > ${path[path.length - 2]} > ${path[path.length - 1]}`;
-    }
-    
-    return path.join(' > ');
-  }
+  let closeCurrentEditor: (() => void) | null = null;
 
   function updateRibbonForNode(node: any) {
       state.activeNode = node; 
@@ -287,7 +194,7 @@ const startApp = () => {
       
       const applyStyleToSelection = (action: (node: any) => void, continuousKey?: string) => {
         if (!continuousKey || !debounceTimers.has('style-' + continuousKey)) saveState();
-        const selected = cy.nodes(':selected').filter('node:not(.box)');
+        const selected = cy.nodes(':selected').not('.box');
         const targets = selected.length > 0 ? selected : cy.collection([node]);
         targets.forEach(n => action(n));
         if (continuousKey) {
@@ -334,28 +241,18 @@ const startApp = () => {
 
       const handleImageUpload = async (base64Image: string, fileName: string) => {
           const ratio = await getImageRatio(base64Image);
-          let blockedInChrono = false;
-          
-          applyStyleToSelection(n => { 
-              const isIntermediate = n.outgoers('node').length > 0;
-              if (state.layoutMode === 'chrono' && isIntermediate) {
-                  blockedInChrono = true;
-                  return; 
-              }
-              n.data('imgRatio', ratio); 
-              n.data('imgUrl', base64Image); 
+          const imgRef = toAssetRef(base64Image); // une seule copie, même pour plusieurs nœuds sélectionnés
+          // (Images acceptées sur tous les taxons, y compris les divergences d'un chronogramme : layout-engine.ts.)
+          applyStyleToSelection(n => {
+              n.data('imgRatio', ratio);
+              n.data('imgUrl', imgRef);
               n.data('imgName', fileName); 
           });
-          
-          if (blockedInChrono) {
-              showCustomAlert(t('alert.chrono_img_error'));
-          } else {
-              if (labelSpan) {
-                  labelSpan.innerText = `\u25A3 ${fileName}`;
-                  labelSpan.title = fileName;
-              }
-              inpImgFile.style.color = 'transparent';
+          if (labelSpan) {
+              labelSpan.innerText = `▣ ${fileName}`;
+              labelSpan.title = fileName;
           }
+          inpImgFile.style.color = 'transparent';
       };
 
       inpImgFile.onclick = (ev) => { (ev.target as HTMLInputElement).value = ''; };
@@ -422,216 +319,6 @@ const startApp = () => {
     ui.btnSave.style.color = newState ? "#e53935" : "#4CAF50"; 
     ui.btnSave.innerText = newState ? t('topbar.file.save') + " \u25CF" : t('topbar.file.save'); 
   }
-
-  const MAX_RECENT_FILES = 3;
-
-  function saveToRecentFiles(fileName: string, exportData: any, pathToSave?: string) {
-    try {
-      let recents = JSON.parse(localStorage.getItem('cladistree_recents') || '[]');
-      recents = recents.filter((f: any) => f.name !== fileName);
-      recents.unshift({ name: fileName, date: new Date().toLocaleDateString() + ' à ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), data: exportData, path: pathToSave });
-      if (recents.length > MAX_RECENT_FILES) recents = recents.slice(0, MAX_RECENT_FILES);
-      localStorage.setItem('cladistree_recents', JSON.stringify(recents));
-      loadRecentFilesUI();
-    } catch (e) { console.warn(t('alert.file_too_large')); }
-  }
-
-  function loadRecentFilesUI() {
-    const container = document.getElementById('recent-files-container');
-    const list = document.getElementById('recent-files-list');
-    if (!container || !list) return;
-
-    try {
-      const recents = JSON.parse(localStorage.getItem('cladistree_recents') || '[]');
-      if (recents.length > 0) {
-        container.style.display = 'block'; list.innerHTML = '';
-        recents.forEach((file: any) => {
-          const btn = document.createElement('button');
-          btn.style.cssText = "padding:8px; cursor:pointer; background:var(--bg-input); color:var(--text-input); border:1px solid var(--border-color); border-radius:3px; text-align:left; font-size:12px; display:flex; justify-content:space-between; align-items:center;";
-          btn.onmouseover = () => btn.style.background = 'var(--bg-hover)'; btn.onmouseout = () => btn.style.background = 'var(--bg-input)';
-          btn.innerHTML = `<strong style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%;">${file.name}</strong> <span style="font-size:10px; opacity:0.7;">${file.date}</span>`;
-          
-          btn.onclick = async () => {
-            try {
-              let treeData = file.data;
-              
-              if (file.path && window.electronAPI && window.electronAPI.readFileDirect) {
-                  const result = await window.electronAPI.readFileDirect(file.path);
-                  if (result.success && result.data) {
-                      let actualBuf = result.data;
-                      if (!(actualBuf instanceof Uint8Array)) {
-                          actualBuf = new Uint8Array((actualBuf as any).type === 'Buffer' ? (actualBuf as any).data : actualBuf);
-                      }
-                      const decoder = new TextDecoder('utf-8');
-                      const text = decoder.decode(actualBuf).replace(/^\uFEFF/, '');
-                      treeData = JSON.parse(text);
-                  }
-              }
-              
-              state.currentFilePath = file.path;
-              cy.startBatch();
-              cy.elements().remove(); 
-              
-              let elementsToAdd = treeData.graph.elements;
-              if (elementsToAdd && !Array.isArray(elementsToAdd)) {
-                  elementsToAdd = [...(elementsToAdd.nodes || []), ...(elementsToAdd.edges || [])];
-              }
-              cy.add(elementsToAdd); 
-              
-              state.currentRootId = treeData.state?.currentRootId || treeData.currentRootId || 'root'; 
-              refreshLayout(true); 
-              cy.endBatch();
-              
-              setTimeout(() => { state.hasUnsavedChanges = false; setUnsavedState(false); stateManager.resetStacks(); stateManager.resetStacks(); }, 100);
-              if (ui.welcomeOverlay) ui.welcomeOverlay.style.display = 'none';
-            } catch (err) { alert(t('alert.recent_error') + " : " + err); }
-          };
-          list.appendChild(btn);
-        });
-      }
-    } catch (e) { console.warn(t('alert.history_read_error')); }
-  }
-
-  function createNewTree() {
-      if (state.hasUnsavedChanges) {
-          if (!confirm(t('confirm.new_tree'))) return;
-      }
-      
-      if (closeCurrentEditor) closeCurrentEditor();
-      isEditing = false;
-      state.activeNode = null;
-      state.clipboard = null;
-      
-      cy.startBatch();
-      cy.elements().remove();
-      cy.add([
-          { group: 'nodes', classes: 'taxon', data: { ...EMPTY_DATA, id: 'root', name: t('default.root'), extinct: false, isBold: true, isItalic: false, sortIndex: 0, period: "" } },
-          { group: 'nodes', classes: 'taxon', data: { ...EMPTY_DATA, id: 'n1', name: t('default.unnamed_branch'), extinct: false, isBold: false, isItalic: false, sortIndex: 0, period: "" } },
-          { group: 'edges', data: { source: 'root', target: 'n1' } }
-      ]);
-      
-      state.currentRootId = 'root';
-      state.currentFilePath = undefined;
-      
-      state.layoutMode = state.appSettings.defaultLayout;
-      ui.btnLayoutNormal.style.background = state.layoutMode === 'standard' ? '#2196F3' : 'var(--bg-input)';
-      (ui.btnLayoutNormal.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'standard' ? 'invert(1) brightness(2)' : 'none';
-      ui.btnLayoutComb.style.background = state.layoutMode === 'comb' ? '#2196F3' : 'var(--bg-input)';
-      (ui.btnLayoutComb.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'comb' ? 'invert(1) brightness(2)' : 'none';
-
-      refreshLayout(true);
-      cy.endBatch();
-      
-      setTimeout(() => { 
-          state.hasUnsavedChanges = false; 
-          setUnsavedState(false); 
-          stateManager.resetStacks(); 
-          stateManager.resetStacks(); 
-      }, 100);
-      
-      if (ui.sidePanel.style.display === 'block') closeSidePanel();
-  }
-
-  async function executeSave(forceSaveAs = false) { 
-      let trueRoot: any = cy.$id(state.currentRootId);
-      while (trueRoot.incomers('node').filter((n: any) => !n.hasClass('box')).length > 0) {
-          trueRoot = trueRoot.incomers('node').filter((n: any) => !n.hasClass('box')).first();
-      }
-      
-      let rootName = 'Arbre_Phylogenetique';
-      if (trueRoot.length > 0 && trueRoot.data('name') && trueRoot.data('name').trim() !== '') {
-          rootName = trueRoot.data('name');
-      }
-      const absoluteRootId = trueRoot.id();
-
-      const exportData = { version: "1.0", currentRootId: absoluteRootId, graph: cy.json() }; 
-
-      try {
-          const dataStr = JSON.stringify(exportData);
-          const targetPath = forceSaveAs ? undefined : state.currentFilePath;
-          
-          const response = await window.electronAPI.saveFile(dataStr, targetPath);
-          
-          if (response.success && response.filePath) {
-              state.currentFilePath = response.filePath; 
-              saveToRecentFiles(rootName, exportData, state.currentFilePath); 
-              setUnsavedState(false);
-              alert(t('alert.save_success') + response.filePath);
-              
-          } else if (response.error) {
-              alert(t('alert.save_error') + response.error);
-          }
-      } catch (err) {
-          console.error(t('alert.backend_error'), err);
-      }
-  }
-
-  function copyClade(node: any) { 
-      const clade = node.union(node.successors()); 
-      state.clipboard = { rootId: node.id(), elements: clade.map((ele: any) => ({ group: ele.group(), data: { ...ele.data() }, classes: ele.classes() })) }; 
-  }
-  
-  function cutClade(node: any) {
-    if (node.id() === 'root') return; 
-    saveState();
-    copyClade(node); 
-    
-    const cladeToDelete = node.union(node.successors());
-    if (cladeToDelete.length > 0) {
-      if (cladeToDelete.contains(cy.$id(state.currentRootId))) state.currentRootId = 'root';
-      cy.remove(cladeToDelete);
-    }
-    refreshLayout();
-    
-    if (ui.sidePanel.style.display === 'block') {
-        ui.sidePanel.style.display = 'none';
-    }
-  }
-
-  function propagateBoxMembership(sourceNode: any, newNodes: any[]) {
-      if (!sourceNode || !newNodes || newNodes.length === 0) return;
-      
-      cy.nodes('.box').forEach((box: any) => {
-          let targets = box.data('targets') || [];
-          if (targets.includes(sourceNode.id())) {
-              let modified = false;
-              newNodes.forEach((n: any) => {
-                  if (!targets.includes(n.id()) && !n.hasClass('box')) {
-                      targets.push(n.id());
-                      modified = true;
-                  }
-              });
-              if (modified) box.data('targets', targets);
-          }
-      });
-  }
-  
-  function pasteClade(targetNode: any) { 
-      if (!state.clipboard) return; 
-      saveState(); 
-      const idMap: { [key: string]: string } = {}; 
-      const newElements: any[] = []; 
-      
-      state.clipboard.elements.filter((e: any) => e.group === 'nodes').forEach((n: any) => { 
-          const oldId = n.data.id; 
-          const newId = 'taxon-' + Date.now() + Math.random().toString(36).substr(2, 5); 
-          idMap[oldId] = newId; 
-          newElements.push({ group: 'nodes', classes: n.classes, data: { ...n.data, id: newId } }); 
-      }); 
-      
-      state.clipboard.elements.filter((e: any) => e.group === 'edges').forEach((e: any) => { 
-          if (idMap[e.data.source] && idMap[e.data.target]) { 
-              newElements.push({ group: 'edges', data: { source: idMap[e.data.source], target: idMap[e.data.target] } }); 
-          } 
-      }); 
-      
-      newElements.push({ group: 'edges', data: { source: targetNode.id(), target: idMap[state.clipboard.rootId] } }); 
-      
-      const added = cy.add(newElements); 
-      propagateBoxMembership(targetNode, added.filter('node').toArray()); 
-      
-      refreshLayout(); 
-  }
   
   function toggleCollapse(node: any) { 
       saveState(); 
@@ -676,33 +363,23 @@ const startApp = () => {
   }
 
   function updateAllUITexts() {
-      const subtitle = document.querySelector('#welcome-overlay p');
-      if (subtitle) subtitle.innerHTML = t('welcome.subtitle');
-      
-      const btnStart = document.getElementById('btn-start');
-      if (btnStart) btnStart.innerHTML = t('welcome.new_project');
-      
-      const tip = document.querySelector('#welcome-overlay i');
-      if (tip) tip.innerHTML = t('welcome.tip');
-      
-      const recentTitle = document.querySelector('#recent-files-container div');
-      if (recentTitle) recentTitle.innerHTML = t('welcome.recent');
+      // Hub d'accueil : textes mis à jour par updateAllUITexts (ui.ts), identifiants précis.
 
       const btnShortcuts = document.getElementById('btn-shortcuts');
       if (btnShortcuts) btnShortcuts.innerHTML = t('btn.shortcuts');
 
       const labels = ui.sidePanel.querySelectorAll('label');
       if (labels.length >= 10) {
-          labels[0].innerHTML = t('label.status') + ' :';
-          labels[1].innerHTML = t('label.rank') + ' :';
-          labels[2].innerHTML = t('label.date') + ' :';
-          labels[3].innerHTML = t('label.author') + ' :';
-          labels[4].innerHTML = t('label.dist') + ' :';
-          labels[5].innerHTML = t('label.size') + ' :';
-          labels[6].innerHTML = t('label.mass') + ' :';
-          labels[7].innerHTML = t('label.period') + ' :';
-          labels[8].innerHTML = t('label.synapo') + ' :';
-          labels[9].innerHTML = t('label.notes') + ' :';
+          labels[0].innerHTML = t('label.status') + colonSep();
+          labels[1].innerHTML = t('label.rank') + colonSep();
+          labels[2].innerHTML = t('label.date') + colonSep();
+          labels[3].innerHTML = t('label.author') + colonSep();
+          labels[4].innerHTML = t('label.dist') + colonSep();
+          labels[5].innerHTML = t('label.size') + colonSep();
+          labels[6].innerHTML = t('label.mass') + colonSep();
+          labels[7].innerHTML = t('label.period') + colonSep();
+          labels[8].innerHTML = t('label.synapo') + colonSep();
+          labels[9].innerHTML = t('label.notes') + colonSep();
       }
 
       const btnExportFiche = document.getElementById('btn-export-fiche');
@@ -789,8 +466,8 @@ const startApp = () => {
           <span id="update-toast-close" title="${t('btn.close')}" style="cursor:pointer; opacity:.55; line-height:1; font-size:15px;">&#10005;</span>
         </div>
         <div style="margin-top:9px; opacity:.85; line-height:1.55;">
-          ${t('update.current')} : <b>${APP_VERSION || '?'}</b><br>
-          ${t('update.latest')} : <b style="color:#4CAF50;">${latest}</b>
+          ${t('update.current')}${colonSep()} <b>${APP_VERSION || '?'}</b><br>
+          ${t('update.latest')}${colonSep()} <b style="color:#4CAF50;">${latest}</b>
         </div>
         <div style="display:flex; gap:7px; margin-top:13px;">
           <button id="update-toast-go" style="flex:1; padding:6px 9px; cursor:pointer; background:#4CAF50; color:#fff; border:none; border-radius:var(--btn-radius); font-weight:bold; font-size:12px;">${t('update.download')}</button>
@@ -924,7 +601,7 @@ const startApp = () => {
       if(confirm(t('confirm.reset_settings'))) {
           localStorage.removeItem('cladistree_settings');
           state.appSettings = {
-              theme: 'light',
+              theme: 'museum',
               lang: 'fr',
               canvasBgLinked: false,
               defaultLayout: 'standard',
@@ -943,22 +620,6 @@ const startApp = () => {
           loadSettings();
       }
   };
-  
-  ui.btnClosePanel.addEventListener('click', closeSidePanel); 
-  ui.btnCloseCross.addEventListener('click', closeSidePanel);
-  ui.btnNew.onclick = createNewTree;
-  ui.btnNewWindow.onclick = () => window.electronAPI.openNewInstance();
-  ui.btnLoad.onclick = async () => {
-      if (window.electronAPI && window.electronAPI.openFile) {
-          const result = await window.electronAPI.openFile(); 
-          if (result.success && result.data && result.fileName) {
-              await loadTreeFromBuffer(result.data as Uint8Array, result.fileName, result.filePath);
-              if (ui.welcomeOverlay) ui.welcomeOverlay.style.display = 'none';
-          }
-      } else {
-          ui.fileInput.click(); 
-      }
-  };
 
   const btnShortcuts = document.getElementById('btn-shortcuts');
 
@@ -974,11 +635,14 @@ const startApp = () => {
                <h3 style="color:#FF9800; margin-bottom:5px;">${t('sc.nav')}</h3>
                <ul style="margin-top:0; padding-left:20px; list-style-type:none; margin-left:-20px;">
                    <li>${t('sc.nav.arrows')}</li>
+                   <li>${t('sc.nav.comb')}</li>
+                   <li>${t('sc.nav.fiche')}</li>
                    <li>${t('sc.nav.alt')}</li>
                    <li>${t('sc.nav.drag')}</li>
                    <li>${t('sc.nav.zoom')}</li>
                    <li>${t('sc.nav.search')}</li>
                    <li>${t('sc.nav.full')}</li>
+                   <li>${t('sc.nav.tabs')}</li>
                </ul>
                
                <h3 style="color:#4CAF50; margin-bottom:5px;">${t('sc.actions')}</h3>
@@ -1000,6 +664,7 @@ const startApp = () => {
                    <li>${t('sc.edit.c_enter')}</li>
                    <li>${t('sc.edit.c_space')}</li>
                    <li>${t('sc.edit.space')}</li>
+                   <li>${t('sc.edit.grab')}</li>
                    <li>${t('sc.edit.del')}</li>
                    <li>${t('sc.edit.all')}</li>
                </ul>
@@ -1075,13 +740,6 @@ const startApp = () => {
   const btnClosePatch = document.getElementById('btn-close-patch');
   if (btnClosePatch) btnClosePatch.onclick = () => patchOverlay.style.display = 'none';
 
-  loadRecentFilesUI();
-
-  if (ui.btnStart && ui.welcomeOverlay) {
-      ui.btnStart.onclick = () => {
-          ui.welcomeOverlay.style.display = 'none';
-      };
-    }
   if (ui.btnCredits && ui.creditsOverlay && ui.btnCloseCredits) {
       ui.btnCredits.onclick = () => {
           ui.creditsOverlay.style.display = 'flex';
@@ -1192,7 +850,7 @@ const startApp = () => {
           selector: 'edge',
           style: {
               'z-index': 5, 'z-index-compare': 'manual', 'width': 2, 'line-color': '#000000', 
-              'curve-style': 'taxi', 'taxi-direction': 'rightward', 'taxi-turn': '15px', 'target-arrow-shape': 'none',
+              'curve-style': 'taxi', 'taxi-direction': 'rightward', 'taxi-turn': TAXI_TURN + 'px', 'target-arrow-shape': 'none',
               'source-endpoint': 'outside-to-node', 'target-endpoint': 'outside-to-node'
           }
       },
@@ -1202,6 +860,74 @@ const startApp = () => {
       }
     ]
   });
+
+  enlargeEmptyNodeHitbox(cy); // divergences sans nom : zone de clic élargie, dessin inchangé
+
+  // <app-context> généré par tests/tools/gen-context.js — accesseurs résolus à l'appel
+  const ctx: AppContext = {
+    get cy() { return cy; },
+    get ui() { return ui; },
+    get checkAutoRank() { return checkAutoRank; },
+    get chronoAgeToX() { return chronoAgeToX; },
+    get chronoAxisMode() { return chronoAxisMode; }, set chronoAxisMode(v) { chronoAxisMode = v; },
+    get closeCurrentEditor() { return closeCurrentEditor; }, set closeCurrentEditor(v) { closeCurrentEditor = v; },
+    get closeSidePanel() { return closeSidePanel; },
+    get container() { return container; },
+    get copyClade() { return copyClade; },
+    get createNewTree() { return createNewTree; },
+    get cutClade() { return cutClade; },
+    get executeSave() { return executeSave; },
+    get focusCameraOnNode() { return focusCameraOnNode; },
+    get getChronoWorldBounds() { return getChronoWorldBounds; },
+    get getGraphBB() { return getGraphBB; },
+    get getNodeSearchStrings() { return getNodeSearchStrings; },
+    get getSheetRootForNode() { return getSheetRootForNode; },
+    get globalTimeMax() { return globalTimeMax; }, set globalTimeMax(v) { globalTimeMax = v; },
+    get globalTimeMin() { return globalTimeMin; }, set globalTimeMin(v) { globalTimeMin = v; },
+    get graftDocument() { return graftDocument; },
+    get graphBBVersion() { return graphBBVersion; }, set graphBBVersion(v) { graphBBVersion = v; },
+    get handleFicheArrow() { return handleFicheArrow; },
+    get handleGrabKey() { return handleGrabKey; },
+    get interceptNestedSheetDeletion() { return interceptNestedSheetDeletion; },
+    get isCameraLocked() { return isCameraLocked; }, set isCameraLocked(v) { isCameraLocked = v; },
+    get isEditing() { return isEditing; }, set isEditing(v) { isEditing = v; },
+    get loadRecentFilesUI() { return loadRecentFilesUI; },
+    get openInlineEditor() { return openInlineEditor; },
+    get openSidePanelForNode() { return openSidePanelForNode; },
+    get pasteClade() { return pasteClade; },
+    get pasteFromSystem() { return pasteFromSystem; },
+    get propagateBoxMembership() { return propagateBoxMembership; },
+    get redo() { return redo; },
+    get refreshLayout() { return refreshLayout; },
+    get renderFicheMedia() { return renderFicheMedia; },
+    get renderSheetClassification() { return renderSheetClassification; },
+    get saveState() { return saveState; },
+    get serializeClade() { return serializeClade; },
+    get setUnsavedState() { return setUnsavedState; },
+    get showCustomAlert() { return showCustomAlert; },
+    get toggleCollapse() { return toggleCollapse; },
+    get undo() { return undo; },
+    get updateCounters() { return updateCounters; },
+    get updateFicheNav() { return updateFicheNav; },
+    get updateRibbonForNode() { return updateRibbonForNode; },
+  };
+  // </app-context>
+  const { propagateBoxMembership, cutClade, copyClade, pasteClade, serializeClade, pasteFromSystem } = initClipboard(ctx);
+  const { loadRecentFilesUI, executeSave, createNewTree, graftDocument } = initFileIO(ctx);
+  loadRecentFilesUI(); // (avant : appelée plus haut, quand c'était une fonction « hissée »)
+  initInteractions(ctx);
+  initKeyboard(ctx);
+  initGraphExport(ctx);
+  const { closeSidePanel, openSidePanelForNode, refreshFicheTitle } = initSidePanel(ctx);
+  initRibbon(ctx); // onglets Style / Affichage / Arbre / Aide (phase 2)
+  initAnnotations(ctx); // surlignage (Ctrl+H) et pinceau des branches (phase 3)
+  const { handleGrabKey } = initDivergenceDrag(ctx); // mode « glisser les divergences » (onglet Arbre, phase 3) et raccourci G
+  const { handleFicheArrow, updateFicheNav } = initFicheNav(ctx); // fiche : taxon terminal précédent / suivant (← / →)
+  const { renderFicheMedia } = initFicheMedia(ctx); // fiche : images multiples et son (phase 3)
+  const { renderSheetClassification, interceptNestedSheetDeletion } = initSheetClassifications(ctx); // classifications alternatives par feuille (phase 3)
+  initRomerUI(ctx); // romérogramme : groupe dédié de l'onglet Arbre, en mode chronogramme (phase 3)
+  initHub(ctx); // hub d'accueil : modèles, récents, langue au premier lancement (phase 4)
+  initGeoChart(ctx); // figure d'aide : frise des temps géologiques détaillée, clous d'or (phase 4)
 
   function checkAutoRank(node: any) {
     if (!state.appSettings.smartTaxonomy) return;
@@ -1213,7 +939,7 @@ const startApp = () => {
 
     let prefixMatch = firstLine.match(/^[†+”"«“'’\s]+/);
     let prefix = prefixMatch ? prefixMatch[0] : '';
-    let cleanName = firstLine.substring(prefix.length).replace(/[”"»”'’\s]+$/, '').trim(); 
+    let cleanName = normalizeAbbrev(firstLine.substring(prefix.length).replace(/[”"»”'’\s]+$/, '').trim()); // « H.sapiens » = « H. sapiens »
     
     if (cleanName.toLowerCase().includes('clade') || cleanName.toLowerCase().includes('taxon') || cleanName.toLowerCase().includes('groupe')) return;
 
@@ -1281,108 +1007,21 @@ const startApp = () => {
     }
   }
 
-  function updateTimeline(val: string) {
-    const parseMa = (s: string) => parseFloat(s.replace(',', '.'));  
-    let start: number | null = null;  
-    let end: number | null = null;
-    
-    const rangeMatch = val.match(/([\d.,]+)\s*-\s*([\d.,]+)/);  
-    if (rangeMatch) {  
-        start = parseMa(rangeMatch[1]);  
-        end = parseMa(rangeMatch[2]);  
-    } else {  
-        const singleMatch = val.match(/([\d.,]+)/);  
-        if (singleMatch) {  
-            start = parseMa(singleMatch[1]);  
-            end = start;  
-        }  
-    }
-    
-    const layerNormal = document.getElementById('timeline-layer-normal');
-    const layerDeep = document.getElementById('timeline-layer-deep');
-    
-    ui.timelineIndicator.style.display = 'none';
-    if(ui.timelineZoomContainer) ui.timelineZoomContainer.style.display = 'none';
-    if(ui.timelineZoomIndicator) ui.timelineZoomIndicator.style.display = 'none';
-
-    if (start !== null && end !== null && !isNaN(start) && !isNaN(end)) {  
-        if (start < end) { const temp = start; start = end; end = temp; }  
-        
-        const isDeepPrecambrian = start > 541 || end > 541;
-        ui.timelineIndicator.style.display = 'block';  
-        
-        if (isDeepPrecambrian) {
-            if (layerNormal) layerNormal.style.display = 'none';
-            if (layerDeep) layerDeep.style.display = 'block';
-            
-            const displayStart = Math.min(4500, Math.max(0, start));  
-            const displayEnd = Math.min(4500, Math.max(0, end));  
-            const leftPct = ((4500 - displayStart) / 4500) * 100;  
-            const widthPct = start === end ? 0 : ((displayStart - displayEnd) / 4500) * 100;  
-            
-            ui.timelineIndicator.style.left = leftPct + '%';  
-            ui.timelineIndicator.style.width = start === end ? '2px' : widthPct + '%';  
-        } else {
-            if (layerNormal) layerNormal.style.display = 'block';
-            if (layerDeep) layerDeep.style.display = 'none';
-            
-            const displayStart = Math.min(600, Math.max(0, start));  
-            const displayEnd = Math.min(600, Math.max(0, end));  
-            const leftPct = ((600 - displayStart) / 600) * 100;  
-            const widthPct = start === end ? 0 : ((displayStart - displayEnd) / 600) * 100;  
-            
-            ui.timelineIndicator.style.left = leftPct + '%';  
-            ui.timelineIndicator.style.width = start === end ? '2px' : widthPct + '%';  
-        }
-
-        if (ui.timelineZoomContainer && ui.timelineZoomContent && ui.timelineZoomIndicator) {
-            const intersectingPeriods = GEO_DETAILS.filter(p => (start! > p.end && end! < p.start));
-            
-            if (intersectingPeriods.length > 0 && intersectingPeriods.length <= 2) {
-                intersectingPeriods.sort((a, b) => b.start - a.start);
-                
-                const zoomStart = intersectingPeriods[0].start;
-                const zoomEnd = intersectingPeriods[intersectingPeriods.length - 1].end;
-                const zoomDuration = zoomStart - zoomEnd;
-                
-                ui.timelineZoomContent.innerHTML = '';
-                
-                intersectingPeriods.forEach(period => {
-                    period.subs.forEach((sub, i) => {
-                        const subDuration = sub.s - sub.e;
-                        const subWidthPct = (subDuration / zoomDuration) * 100;
-                        
-                        const shadeAmount = (i / Math.max(1, period.subs.length - 1)) * 40 - 20;
-                        const stageColor = adjustColorLightness(period.color, shadeAmount);
-                        
-                        const subDiv = document.createElement('div');
-                        subDiv.style.cssText = `width:${subWidthPct}%; height:100%; background-color:${stageColor}; border-right:1px solid rgba(0,0,0,0.15); box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:9px; color:rgba(0,0,0,0.8); white-space:nowrap; text-overflow:clip; cursor:help; padding:0 2px;`;
-                        subDiv.title = `${t(sub.k)} (${sub.s} - ${sub.e} Ma)`;
-                        if (subWidthPct > 6) subDiv.innerText = t(sub.k);
-                        
-                        ui.timelineZoomContent.appendChild(subDiv);
-                    });
-                });
-
-                const zDisplayStart = Math.min(zoomStart, Math.max(zoomEnd, start));
-                const zDisplayEnd = Math.min(zoomStart, Math.max(zoomEnd, end));
-                
-                const zLeftPct = ((zoomStart - zDisplayStart) / zoomDuration) * 100;
-                const zWidthPct = start === end ? 0 : ((zDisplayStart - zDisplayEnd) / zoomDuration) * 100;
-                
-                ui.timelineZoomIndicator.style.left = zLeftPct + '%';
-                ui.timelineZoomIndicator.style.width = start === end ? '2px' : zWidthPct + '%';
-                
-                ui.timelineZoomContainer.style.display = 'block';
-                ui.timelineZoomIndicator.style.display = 'block';
-            }
-        }
-    }
-  }
-
   function calculateTaxaCounts(nodes: any) {
     const uniqueGenera = new Set<string>();
     const uniqueSpecies = new Set<string>();
+    const unnamedBranch = t('default.unnamed_branch').toLowerCase();
+    // Genre (nœud de rang Genre) le plus proche au-dessus de chaque nœud, mémorisé : chaque remontée de
+    // l'arbre profite aux suivantes (avant : une remontée complète par espèce).
+    const genusAbove = new Map<string, any>();
+    const findGenusAbove = (node: any): any => {
+        const id = node.id();
+        if (genusAbove.has(id)) return genusAbove.get(id);
+        const parent = node.incomers('node').first();
+        const found = (!parent || parent.length === 0 || parent.hasClass('box')) ? null : (parent.data('rank') === 'Genre' ? parent : findGenusAbove(parent));
+        genusAbove.set(id, found);
+        return found;
+    };
 
     nodes.forEach((n: any) => {
         if (!state.appSettings.countInvalid) {
@@ -1394,7 +1033,7 @@ const startApp = () => {
         if (!rawName || rawName.trim() === '') return;
 
         let cleanName = rawName.split('\n')[0].replace(/^[†+”"«“'’\s]+/, '').replace(/[”"»”'’\s]+$/, '').trim().toLowerCase();
-        if (cleanName === '' || cleanName === t('default.unnamed_branch').toLowerCase()) return;
+        if (cleanName === '' || cleanName === unnamedBranch) return;
 
         const explicitRank = n.data('rank');
         const words = cleanName.split(/[ \t]+/);
@@ -1403,14 +1042,7 @@ const startApp = () => {
 
         if (isSpeciesRank) {
             let trueGenus = '';
-            let parentGenusNode = null;
-            if (n.incomers) {
-                let curr = n.incomers('node').first();
-                while(curr && curr.length > 0 && !curr.hasClass('box')) {
-                    if (curr.data('rank') === 'Genre') { parentGenusNode = curr; break; }
-                    curr = curr.incomers('node').first();
-                }
-            }
+            const parentGenusNode = n.incomers ? findGenusAbove(n) : null;
 
             if (parentGenusNode) {
                 let pName = parentGenusNode.data('name') || '';
@@ -1455,7 +1087,7 @@ const startApp = () => {
   }
 
   function updateCounters() {
-    const allNodes = cy.nodes().filter((n: any) => !n.hasClass('box'));
+    const allNodes = cy.nodes().filter((n: any) => !n.hasClass('box') && !n.hasClass('romer-spindle'));
     const total = calculateTaxaCounts(allNodes);
 
     const selected = cy.nodes(':selected').filter((n: any) => !n.hasClass('box'));
@@ -1470,9 +1102,10 @@ const startApp = () => {
   }
 
   function applyTheme(themeName: string) { 
-      const themesList = ['light', 'dark', 'sepia', 'ingen', 'console', 'high-contrast', 'dimmed']; 
+      const themesList = ['museum', 'light', 'dark', 'sepia', 'ingen', 'console', 'high-contrast', 'dimmed']; 
       if (!themesList.includes(themeName)) themeName = 'light'; 
       document.body.setAttribute('data-theme', themeName); 
+      refreshBrandMedia(themeName); // logo aux traits clairs sur les thèmes sombres
 
       let wpLayer = document.getElementById('wallpaper-layer');
       if (!wpLayer) {
@@ -1515,6 +1148,7 @@ const startApp = () => {
               cy.style().selector('.taxon').style({ 'color': '#000000' }).update();
               cy.style().selector('edge').style({ 'line-color': '#000000' }).update();
           }
+          reapplyAnnotationStyles(cy); // après les règles de couleur du thème, sinon elles masquent surlignage et pinceau
       }, 10);
   }
 
@@ -1831,66 +1465,29 @@ const startApp = () => {
       requestAnimationFrame(chronoRafLoop);
   };
 
-  const CHRONO_PX_PER_MA = 20;
   const CHRONO_EDGE_PAD = 40; 
 
-  type ChronoAxisMode = 'linear' | 'sqrt' | 'log' | 'rank';
   let chronoAxisMode: ChronoAxisMode = 'linear';
   let chronoAxisLo = 0;    
   let chronoAxisHi = 100;  
   let chronoRankAges: number[] = []; 
 
-  type ChronoBoundsMode = 'period' | 'tight';
   let chronoBoundsMode: ChronoBoundsMode = 'period';
+  // (Ancien bouton « Barres : fidèle / lisible » retiré : la géométrie de layout-engine.ts place chaque tronc
+  // juste avant son premier enfant, ce qui écarte déjà les troncs d'au moins 24 px.)
 
-  let chronoLanesEnabled = false;
-  let chronoLaneCount = 0;
-  const CHRONO_LANE_MIN = 8;       
-  const CHRONO_LANE_STEP = 3;      
-  const CHRONO_LANE_MAX_TURN = 12; 
-
-  const chronoWarp = (age: number): number => {
-      const a = Math.max(0, age);
-      if (chronoAxisMode === 'sqrt') return Math.sqrt(a);
-      if (chronoAxisMode === 'log') return Math.log1p(a);
-      if (chronoAxisMode === 'rank') {
-          const n = chronoRankAges.length;
-          if (n === 0) return a;
-          if (a <= chronoRankAges[0]) return 0;
-          if (a >= chronoRankAges[n - 1]) return n - 1;
-          let lo = 0;
-          let hi = n - 1;
-          while (hi - lo > 1) {
-              const mid = (lo + hi) >> 1;
-              if (chronoRankAges[mid] <= a) lo = mid; else hi = mid;
-          }
-          const span = chronoRankAges[hi] - chronoRankAges[lo];
-          return span <= 0 ? lo : lo + (a - chronoRankAges[lo]) / span;
-      }
-      return a;
-  };
-
-  const chronoAgeToX = (age: number): number => {
-      const a = Math.max(0, age);
-      const linear = -(a * CHRONO_PX_PER_MA);
-      if (chronoAxisMode === 'linear') return linear;
-
-      const lo = chronoAxisLo;
-      const hi = chronoAxisHi;
-      if (!(hi > lo)) return linear;
-
-      const wLo = chronoWarp(lo);
-      const wHi = chronoWarp(hi);
-      if (!(wHi > wLo)) return linear;
-
-      const u = (chronoWarp(a) - wLo) / (wHi - wLo);
-      return -(lo * CHRONO_PX_PER_MA) - u * ((hi - lo) * CHRONO_PX_PER_MA);
-  };
+  // Conversion âge → abscisse : source unique dans chrono-axis.ts (échelle par morceaux, Précambrien comprimé).
+  const chronoAgeToX = (age: number): number =>
+      axisAgeToX(chronoAxisMode, chronoAxisLo, chronoAxisHi, chronoRankAges, age);
 
   let chronoContentRight = 0;
   let chronoContentLeft = 0;
 
-  const CHRONO_RULER_BOTTOM = 100;
+  // CHRONO_RULER_BOTTOM se mesure depuis le bas de #app (35 px au-dessus du bas de la fenêtre). La barre de
+  // défilement horizontale occupe les 45 à 60 px du bas de la fenêtre : la frise se pose juste dessus.
+  // (En 1.3, la hauteur 100vh d'index.html faisait déborder #app de 40 px sous la fenêtre, d'où l'ancienne
+  // valeur 100 ; APP_CSS impose désormais height:auto et le bas de #app est réellement à 35 px.)
+  const CHRONO_RULER_BOTTOM = 25;
   const CHRONO_STAGE_H = 40;
   const CHRONO_PERIOD_H = 24;
   const CHRONO_RULER_H = CHRONO_STAGE_H + CHRONO_PERIOD_H;
@@ -1941,28 +1538,67 @@ const startApp = () => {
           globalTimeMax = maxAge + padding;
           globalTimeMin = Math.max(0, minAge - padding);
       }
-      
-      console.log(`[Chrono] Échelle calculée : De ${globalTimeMax.toFixed(1)} à ${globalTimeMin.toFixed(1)}`);
   }
 
+  /**
+   * Écrit seulement les données qui changent. Réécrire une valeur identique suffit à faire recalculer le style
+   * (et redessiner) le nœud : sur un grand arbre, chaque mise en page recalculait ainsi tous les nœuds.
+   */
+  const setDataIfChanged = (node: any, values: Record<string, any>) => {
+      const changed: Record<string, any> = {};
+      let any = false;
+      for (const k in values) {
+          const v = values[k], cur = node.data(k);
+          const same = v !== null && typeof v === 'object' ? JSON.stringify(v) === JSON.stringify(cur) : v === cur;
+          if (!same) { changed[k] = v; any = true; }
+      }
+      if (any) node.data(changed);
+  };
+  /** Styles posés par le chronogramme à effacer au prochain passage en standard / peigne (voir refreshLayout). */
+  let stylesFromChrono = true;
+  /** Visibilité posée sur chaque nœud par la dernière mise en page standard / peigne. */
+  const displayState = new Map<string, string>();
+  cy.on('add', 'node', (e: any) => { displayState.delete(e.target.id()); }); // nouvel élément (collage, annulation…) : sans style posé
+  let lastRomerReserve: RomerReserve | null = null; // lignes réservées aux fuseaux par la dernière mise en page
   function refreshLayout(fitCamera = false) {
       const themeBgColor = getComputedStyle(document.body).getPropertyValue('--bg-panel').trim() || '#ffffff';
       const themeTextColor = getComputedStyle(document.body).getPropertyValue('--text-main').trim() || '#000000';
       
-      cy.startBatch(); 
+      cy.startBatch();
+      // try/finally : une exception pendant la mise en page ne doit JAMAIS laisser Cytoscape en mode « lot »
+      // (plus aucun rendu, puis blocage progressif de l'application).
+      try {
+      removeRomer(cy); // fuseaux du romérogramme : recalculés après la mise en page
       updateBreadcrumbs(); 
       updateSheetsBar(); 
       updateCounters();
       analyzeTimeBounds();
 
       if (state.layoutMode === 'chrono' && state.currentRootId) {
+          stylesFromChrono = true; // le chronogramme pose ses propres styles sur les éléments
           // --- MOTEUR GÉOMÉTRIQUE EXTERNALISÉ ---
-          const limits = LayoutEngine.applyLayout(cy, state, themeTextColor, textWidthCache, chronoAxisMode);
-          
+          // Romérogramme : la mise en page réserve la hauteur de chaque fuseau (réservation du passage précédent).
+          if (!romerSettings.enabled) lastRomerReserve = null;
+          const limits = LayoutEngine.applyLayout(cy, state, themeTextColor, textWidthCache, chronoAxisMode, chronoBoundsMode, lastRomerReserve);
+
           globalTimeMax = limits.globalTimeMax;
           globalTimeMin = limits.globalTimeMin;
           chronoAxisLo = globalTimeMin;
           chronoAxisHi = globalTimeMax;
+          if (romerSettings.enabled) {
+              // Le romérogramme est un habillage : une erreur ne doit pas empêcher d'afficher le chronogramme.
+              try {
+                  let plans = planRomer(cy, state.currentRootId, chronoAgeToX);
+                  const reserve = romerReserve(plans);
+                  if (!sameReserve(lastRomerReserve, reserve)) {
+                      // Fuseaux ou hauteurs changés : mise en page refaite avec la bonne réservation (abscisses inchangées).
+                      lastRomerReserve = reserve;
+                      LayoutEngine.applyLayout(cy, state, themeTextColor, textWidthCache, chronoAxisMode, chronoBoundsMode, reserve);
+                      plans = planRomer(cy, state.currentRootId, chronoAgeToX);
+                  }
+                  drawRomer(cy, plans);
+              } catch (err) { console.error('Romérogramme :', err); removeRomer(cy); lastRomerReserve = null; }
+          }
       } else {
           // --- LOGIQUE STANDARD ET PEIGNE ---
           const nodesById = new Map<string, any>();
@@ -2006,7 +1642,7 @@ const startApp = () => {
 
               const dynamicName = LayoutEngine.getDynamicNodeName(node, state);
               const isEmptyBranch = (dynamicName === '') && !hasImage;
-              node.data('isEmpty', isEmptyBranch);
+              if (node.data('isEmpty') !== isEmptyBranch) node.data('isEmpty', isEmptyBranch);
 
               const fontSize = node.data('fontSize') || 16;
               const cacheKey = `${dynamicName}_${node.data('extinct')}_${node.data('isBold')}_${node.data('isItalic')}_${node.data('collapsed')}_${hasLink}_${fontSize}_${node.data('fontFamily') || 'serif'}`;
@@ -2062,7 +1698,7 @@ const startApp = () => {
                   bgPosYs.push('50%');
               }
 
-              node.data({
+              setDataIfChanged(node, {
                   renderWidth: finalW, renderHeight: finalH,
                   imgOffsetX: imgOffsetX, imgOffsetY: imgOffsetY, textMarginX: txtOffsetX, textMarginY: txtOffsetY,
                   labelW: blockW, labelH: blockH, displayName: dynamicName, computedLabel: labelText, hasSheetContent: hasSheetContent,
@@ -2153,9 +1789,11 @@ const startApp = () => {
                   return nodeY; 
               } else {
                   let startY = currentY; let sumY = 0; 
-                  childrenArray.forEach(child => { 
-                      let nextLeftX = rightX + xGap; 
-                      
+                  childrenArray.forEach(child => {
+                      // Décalage manuel de la divergence le long de sa branche (mode « glisser les divergences »).
+                      const manualOffset = state.layoutMode === 'standard' ? Math.max(MIN_BRANCH_OFFSET, child.data('branchOffset') || 0) : 0;
+                      let nextLeftX = rightX + xGap + manualOffset;
+
                       if (state.layoutMode === 'comb') {
                           const childSteps = stepsToLeafMap.get(child.id()) || 0;
                           const childTight = tightDistMap.get(child.id()) || 0;
@@ -2190,19 +1828,30 @@ const startApp = () => {
                 
           if (nodesById.has(state.currentRootId)) fastWalk(state.currentRootId, 0);
 
+          // Effacement complet des styles posés : seulement au premier passage après le chronogramme (qui pose
+          // tailles, marges et formes sur chaque nœud et arête). Sinon, on ne touche qu'à la visibilité des nœuds
+          // qui changent : effacer et reposer les styles de tous les éléments forçait Cytoscape à tout recalculer
+          // (phase 5 : ~20 % du temps d'une action sur un arbre de 2 400 nœuds).
+          const fullReset = stylesFromChrono;
+          stylesFromChrono = false;
+          if (fullReset) displayState.clear();
           cy.nodes().forEach(n => {
               if (n.hasClass('box')) return;
-              n.removeStyle(); 
-              if (visibleNodes.has(n.id())) {
-                  n.style('display', 'element');
-                  const pos = calculatedPositions.get(n.id());
-                  if (pos) n.position(pos);
-              } else n.style('display', 'none');
+              const id = n.id();
+              const visible = visibleNodes.has(id);
+              if (fullReset) { n.removeStyle(); n.removeScratch(CHRONO_STYLE_SCRATCH); }
+              const want = visible ? 'element' : 'none';
+              if (fullReset || displayState.get(id) !== want) { n.style('display', want); displayState.set(id, want); }
+              if (visible) {
+                  const pos = calculatedPositions.get(id);
+                  // Position réécrite seulement si elle change (sinon Cytoscape invalide le nœud pour rien).
+                  if (pos) { const cur = n.position(); if (cur.x !== pos.x || cur.y !== pos.y) n.position(pos); }
+              }
           });
 
-          cy.edges().forEach(e => {
+          if (fullReset) cy.edges().forEach(e => {
               if (e.id() === 'ghost-edge') return;
-              e.removeStyle(); 
+              e.removeStyle(); e.removeScratch(CHRONO_STYLE_SCRATCH);
           });
       }
 
@@ -2297,31 +1946,40 @@ const startApp = () => {
                   }
               });
               if (showZero) bgHtml += `<div style="position:absolute; left:0px; top:0; width:1px; height:100%; background-color:${themeTextColor}; opacity:0.25;"></div>`;
+              // Rupture d'échelle (Précambrien comprimé, voir chrono-axis.ts) : double trait pointillé + mention côté Précambrien.
+              const breakX = hasScaleBreak(chronoAxisMode, globalTimeMin, globalTimeMax) ? chronoAgeToX(SCALE_BREAK_AGE) * zoom : NaN;
+              const breakLabel = t('chrono.scale_break').replace('{n}', String(PRECAMBRIAN_COMPRESSION));
+              const breakTitle = t('chrono.scale_break.title').replace('{n}', String(PRECAMBRIAN_COMPRESSION)).replace('{age}', String(SCALE_BREAK_AGE));
+              if (!isNaN(breakX)) {
+                  bgHtml += `<div style="position:absolute; left:${breakX - 2}px; top:0; width:0; height:100%; border-left:1px dashed ${themeTextColor}; opacity:0.7;"></div><div style="position:absolute; left:${breakX + 2}px; top:0; width:0; height:100%; border-left:1px dashed ${themeTextColor}; opacity:0.7;"></div>`;
+                  bgHtml += `<div style="position:absolute; left:${breakX - 8}px; top:6px; transform:translateX(-100%); white-space:nowrap; font-size:11px; font-style:italic; font-weight:bold; color:${themeTextColor}; opacity:0.8;">${breakLabel}</div>`;
+              }
               bgHtml += `</div></div>`;
               bgEl.innerHTML = bgHtml;
 
               const labelDefs: { name: string, abbr: string, cs: number, ce: number, top: number, h: number, fs: number, fw: string, ls: string, minW: number }[] = [];
               let rlHtml = `<div style="position:absolute; top:0; left:0; right:0; bottom:0; background:var(--bg-panel, #ffffff);"></div><div id="chrono-track-ruler" style="position:absolute; left:0; top:0; width:1px; height:100%; transform:translateX(${panX}px); transform-origin:left center;"><div style="position:absolute; top:0; left:0; width:1px; height:${CHRONO_RULER_H}px; pointer-events:auto;">`;
 
-              GEO_DETAILS.forEach((period: any, idx: number) => {
-                  if (period.subs && period.subs.length > 0) {
-                      period.subs.forEach((sub: any, i: number) => {
-                          const c = clipSpan(sub.s, sub.e); if (!c || !isVisible(c.x, c.w)) return;
-                          const shadeAmount = (i / Math.max(1, period.subs.length - 1)) * 40 - 20;
-                          const stageColor = adjustColorLightness(period.color, shadeAmount);
-                          const stageName = t(sub.k) !== sub.k ? t(sub.k) : sub.k.replace('geo.', '');
-                          const stageAbbr = stageName.length > 4 ? stageName.substring(0, 3) + '.' : stageName;
-                          const tooltip = `${stageName} (${sub.s} - ${sub.e} Ma)`;
-                          const showTick = c.w > 22 && c.cs === sub.s;
-                          
-                          rlHtml += `<div title="${tooltip}" style="position:absolute; left:${c.x}px; top:0; width:${c.w}px; height:${CHRONO_STAGE_H}px; background-color:${stageColor}; border-right:1px solid rgba(0,0,0,0.3); box-sizing:border-box; overflow:hidden; cursor:help;"></div>`;
-                          labelDefs.push({ name: stageName, abbr: stageAbbr, cs: c.cs, ce: c.ce, top: CHRONO_STAGE_H - 16, h: 14, fs: 10, fw: '700', ls: '0', minW: 50 });
-                          
-                          if (showTick) {
-                              rlHtml += `<div style="position:absolute; left:${c.x}px; top:2px; width:1px; height:6px; background-color:#000000; z-index:2;"></div><div style="position:absolute; left:${c.x - 30}px; top:9px; width:60px; text-align:center; font-size:9px; font-weight:bold; color:#000000; z-index:2; pointer-events:none;">${sub.s}</div>`;
-                          }
-                      });
-                  }
+              GEO_DETAILS.forEach((period, idx: number) => {
+                  const stages = stagesOf(period);
+                  stages.forEach((sub, i: number) => {
+                      const c = clipSpan(sub.s, sub.e); if (!c || !isVisible(c.x, c.w)) return;
+                      const shadeAmount = (i / Math.max(1, stages.length - 1)) * 40 - 20;
+                      const stageColor = adjustColorLightness(period.color, shadeAmount);
+                      const stageName = t(sub.k) !== sub.k ? t(sub.k) : sub.k.replace('geo.', '');
+                      const stageAbbr = stageName.length > 4 ? stageName.substring(0, 3) + '.' : stageName;
+                      const tooltip = `${stageName} (${sub.s} - ${sub.e} Ma)`;
+                      const showTick = c.w > 22 && c.cs === sub.s;
+                      // Unité sans subdivision (Archéen, Hadéen) : bloc sans étiquette, le nom est déjà sur la rangée basse.
+                      const isSelf = sub.k === period.key;
+
+                      rlHtml += `<div title="${tooltip}" style="position:absolute; left:${c.x}px; top:0; width:${c.w}px; height:${CHRONO_STAGE_H}px; background-color:${stageColor}; border-right:1px solid rgba(0,0,0,0.3); box-sizing:border-box; overflow:hidden; cursor:help;"></div>`;
+                      if (!isSelf) labelDefs.push({ name: stageName, abbr: stageAbbr, cs: c.cs, ce: c.ce, top: CHRONO_STAGE_H - 16, h: 14, fs: 10, fw: '700', ls: '0', minW: 50 });
+
+                      if (showTick) {
+                          rlHtml += `<div style="position:absolute; left:${c.x}px; top:2px; width:1px; height:6px; background-color:#000000; z-index:2;"></div><div style="position:absolute; left:${c.x - 30}px; top:9px; width:60px; text-align:center; font-size:9px; font-weight:bold; color:#000000; z-index:2; pointer-events:none;">${sub.s}</div>`;
+                      }
+                  });
                   const pc = clipSpan(period.start, period.end);
                   if (pc && isVisible(pc.x, pc.w)) {
                       const pName = CHRONO_PERIOD_KEYS[idx] ? t(CHRONO_PERIOD_KEYS[idx]) : "";
@@ -2334,6 +1992,11 @@ const startApp = () => {
 
               if (showZero) {
                   rlHtml += `<div style="position:absolute; left:0px; top:2px; width:1px; height:6px; background-color:#000000; z-index:2;"></div><div style="position:absolute; left:-30px; top:9px; width:60px; text-align:center; font-size:9px; font-weight:bold; color:#000000; z-index:2; pointer-events:none;">0</div>`;
+              }
+              if (!isNaN(breakX)) {
+                  // Coupure blanche bordée de deux traits (convention des axes interrompus), sous les graduations
+                  // pour laisser lisible l'âge de la limite (538,8).
+                  rlHtml += `<div title="${breakTitle}" style="position:absolute; left:${breakX - 3}px; top:20px; width:6px; height:${CHRONO_RULER_H - 20}px; background:#ffffff; border-left:1.5px solid #000000; border-right:1.5px solid #000000; box-sizing:border-box; z-index:3; cursor:help;"></div>`;
               }
               rlHtml += `</div></div><div style="position:absolute; top:0; left:0; right:0; height:2px; background:var(--text-main, #000);"></div><div style="position:absolute; bottom:0; left:0; right:0; height:2px; background:var(--text-main, #000);"></div><div id="chrono-ruler-labels" style="position:absolute; top:0; left:0; right:0; bottom:0; overflow:hidden; pointer-events:none;"></div>`;
               rulerEl.innerHTML = rlHtml;
@@ -2378,7 +2041,7 @@ const startApp = () => {
           
           let expandedTargets = targetCollection;
           if (isMono) {
-              expandedTargets = targetCollection.union(targetCollection.successors('node:not(.box)'));
+              expandedTargets = targetCollection.union(targetCollection.successors('node').not('.box'));
           }
           
           const ids = new Set(expandedTargets.map((n: any) => n.id()));
@@ -2536,7 +2199,8 @@ const startApp = () => {
           }
       });
       
-      cy.endBatch(); 
+      } finally { cy.endBatch(); }
+      refreshBranchPaint(cy); // pinceau : dépend de la position des coudes, recalculée ci-dessus
 
       if (isFirstLoad || fitCamera) { 
             isFittingCamera = true; 
@@ -2566,264 +2230,15 @@ const startApp = () => {
                     setTimeout(() => { isFittingCamera = false; }, 100); 
                 }
             }, 50); // Un seul délai centralisé de 50ms pour laisser le DOM respirer
-            isFirstLoad = false; 
+            isFirstLoad = false;
         }
     }
-
-    console.log(cy.nodes().map(n => ({ id: n.data('name'), x: n.position('x'), w: n.width(), bbox: n.boundingBox() })))
-
-    async function handleGraft(file: File, targetNode: any) {
-    saveState(); 
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    const idSuffix = '-' + Date.now().toString(36); 
-    const newElements: any[] = [];
-    let importedRootId: string | null = null;
-
-    if (ext === 'xmind') {
-      try {
-        const arrayBuffer = await file.arrayBuffer(); 
-        const unzipped = unzipSync(new Uint8Array(arrayBuffer));
-        const contentJsonData = unzipped['content.json']; 
-        if (!contentJsonData) throw new Error(t('alert.json_not_found'));
-        
-        const contentStr = strFromU8(contentJsonData); 
-        const xmindData = JSON.parse(contentStr); 
-        const rootTopic = xmindData[0].rootTopic; 
-        importedRootId = rootTopic.id + idSuffix;
-
-        const parseNode = async (node: any, parentId: string | null, depth: number) => {
-            const id = node.id + idSuffix; 
-            let rawTitle = node.title || ""; 
-            if (node.attributedTitle) rawTitle = node.attributedTitle.map((part: any) => part.text).join('');
-            let extinct = false; 
-            if (rawTitle.startsWith('\u2020 ')) { extinct = true; rawTitle = rawTitle.substring(2); } 
-            else if (rawTitle.startsWith('\u2020')) { extinct = true; rawTitle = rawTitle.substring(1); }
-            const styleProps = node.style?.properties || {}; 
-            const isBold = styleProps["fo:font-weight"] === "700" || styleProps["fo:font-weight"] === "bold"; 
-            const isItalic = styleProps["fo:font-style"] === "italic"; 
-            let notes = "";
-            if (node.labels && node.labels.length > 0) {
-                const cleanLabels = node.labels.filter((l: string) => !l.toLowerCase().includes('extinct') && !l.includes('†'));
-                if (cleanLabels.length > 0) {
-                    notes = t('alert.xmind_labels') + cleanLabels.join(', ');
-                }
-            }
-            
-            let imgUrl = ""; let imgRatio = 1;
-            if (node.image && node.image.src && node.image.src.startsWith("xap:resources/")) {
-                const resourcePath = node.image.src.replace("xap:", ""); const imgData = unzipped[resourcePath];
-                if (imgData) { 
-                  const chunks = []; const chunkSize = 8192; for (let i = 0; i < imgData.length; i += chunkSize) { chunks.push(String.fromCharCode.apply(null, Array.from(imgData.subarray(i, i + chunkSize)))); } const base64 = btoa(chunks.join('')); const fileExt = resourcePath.split('.').pop()?.toLowerCase(); const mime = fileExt === 'jpg' || fileExt === 'jpeg' ? 'image/jpeg' : fileExt === 'svg' ? 'image/svg+xml' : 'image/png'; 
-                  imgUrl = `data:${mime};base64,${base64}`; imgRatio = await getImageRatio(imgUrl);
-                }
-            }
-            newElements.push({ group: 'nodes', classes: 'taxon', data: { ...EMPTY_DATA, id: id, name: rawTitle, parent: null, extinct: extinct, isBold: isBold, isItalic: isItalic, notes: notes, imgUrl: imgUrl, imgRatio: imgRatio, sortIndex: depth } });
-            if (parentId) newElements.push({ group: 'edges', data: { source: parentId, target: id } });
-            if (node.children && node.children.attached) { let sortCounter = 0; for (const child of node.children.attached) { await parseNode(child, id, sortCounter++); } }
-        };
-        await parseNode(rootTopic, null, 0); 
-
-      } catch (err) { alert(t('alert.graft_error') + err); return; }
-    } else {
-      try {
-        const text = await file.text();
-        const parsed = JSON.parse(text);
-        const idMap: { [key: string]: string } = {};
-
-        let elementsArray: any[] = [];
-        if (Array.isArray(parsed.graph.elements)) {
-            elementsArray = parsed.graph.elements;
-        } else if (parsed.graph.elements) {
-            elementsArray = [
-                ...(parsed.graph.elements.nodes || []),
-                ...(parsed.graph.elements.edges || [])
-            ];
-        }
-
-        const allNodeIds = new Set<string>();
-        const allTargetIds = new Set<string>();
-        elementsArray.forEach((ele: any) => {
-            if (ele.group === 'nodes') allNodeIds.add(ele.data.id);
-            if (ele.group === 'edges') allTargetIds.add(ele.data.target);
-        });
-
-        let trueRootId = parsed.state?.currentRootId || parsed.currentRootId || 'root';
-        for (const id of allNodeIds) {
-            if (!allTargetIds.has(id)) { 
-                trueRootId = id;
-                break;
-            }
-        }
-        importedRootId = trueRootId + idSuffix;
-
-        elementsArray.forEach((ele: any) => {
-            if (ele.group === 'nodes') {
-                const oldId = ele.data.id;
-                const newId = oldId + idSuffix;
-                idMap[oldId] = newId;
-                const newParent = ele.data.parent ? ele.data.parent + idSuffix : null;
-                
-                newElements.push({ 
-                    group: 'nodes', 
-                    classes: ele.classes, 
-                    data: { ...ele.data, id: newId, parent: newParent } 
-                });
-            }
-        });
-
-        elementsArray.forEach((ele: any) => {
-            if (ele.group === 'edges') {
-                if (idMap[ele.data.source] && idMap[ele.data.target]) {
-                    const edgeData = { ...ele.data };
-                    if (edgeData.id) edgeData.id = edgeData.id + idSuffix;
-                    edgeData.source = idMap[ele.data.source];
-                    edgeData.target = idMap[ele.data.target];
-
-                    newElements.push({ group: 'edges', classes: ele.classes, data: edgeData });
-                }
-            }
-        });
-      } catch (err) { 
-        alert(t('alert.phylo_error') + err); 
-        return; 
-      }
-    }
-
-    if (importedRootId) {
-        newElements.push({ group: 'edges', data: { source: targetNode.id(), target: importedRootId } });
-    }
-
-    cy.startBatch();
-    const added = cy.add(newElements);
-    propagateBoxMembership(targetNode, added.filter('node').toArray());
-
-    cy.nodes().forEach((node: any) => {
-        if (node.id().endsWith(idSuffix) && !node.hasClass('box')) {
-            checkAutoRank(node);
-        }
-    });
-
-    refreshLayout();
-    cy.endBatch();
-  }
-
-  async function loadTreeFromBuffer(buffer: Uint8Array, fileName: string, filePath?: string) {
-    state.currentFilePath = filePath;
-    const ext = fileName.split('.').pop()?.toLowerCase();
-    
-    if (ext === 'xmind') {
-      state.currentFilePath = undefined; 
-      try {
-        const unzipped = unzipSync(buffer);
-        const contentJsonData = unzipped['content.json']; if (!contentJsonData) throw new Error(t('alert.json_not_found'));
-        const contentStr = strFromU8(contentJsonData); const xmindData = JSON.parse(contentStr); const rootTopic = xmindData[0].rootTopic; const newElements: any[] = [];
-        
-        const parseNode = async (node: any, parentId: string | null, depth: number) => {
-            const id = node.id; let rawTitle = node.title || ""; if (node.attributedTitle) rawTitle = node.attributedTitle.map((part: any) => part.text).join('');
-            let extinct = false; if (rawTitle.startsWith('\u2020 ')) { extinct = true; rawTitle = rawTitle.substring(2); } else if (rawTitle.startsWith('\u2020')) { extinct = true; rawTitle = rawTitle.substring(1); }
-            const styleProps = node.style?.properties || {}; const isBold = styleProps["fo:font-weight"] === "700" || styleProps["fo:font-weight"] === "bold"; const isItalic = styleProps["fo:font-style"] === "italic"; let notes = "";
-            if (node.labels && node.labels.length > 0) {
-                const cleanLabels = node.labels.filter((l: string) => !l.toLowerCase().includes('extinct') && !l.includes('†'));
-                if (cleanLabels.length > 0) {
-                    notes = "Étiquettes XMind : " + cleanLabels.join(', ');
-                }
-            }
-            let imgUrl = ""; let imgRatio = 1;
-            if (node.image && node.image.src && node.image.src.startsWith("xap:resources/")) {
-                const resourcePath = node.image.src.replace("xap:", ""); const imgData = unzipped[resourcePath];
-                if (imgData) { 
-                  const chunks = []; const chunkSize = 8192; for (let i = 0; i < imgData.length; i += chunkSize) { chunks.push(String.fromCharCode.apply(null, Array.from(imgData.subarray(i, i + chunkSize)))); } const base64 = btoa(chunks.join('')); const fileExt = resourcePath.split('.').pop()?.toLowerCase(); const mime = fileExt === 'jpg' || fileExt === 'jpeg' ? 'image/jpeg' : fileExt === 'svg' ? 'image/svg+xml' : 'image/png'; 
-                  imgUrl = `data:${mime};base64,${base64}`; imgRatio = await getImageRatio(imgUrl);
-                }
-            }
-            newElements.push({ group: 'nodes', classes: 'taxon', data: { ...EMPTY_DATA, id: id, name: rawTitle, parent: null, extinct: extinct, isBold: isBold, isItalic: isItalic, notes: notes, imgUrl: imgUrl, imgRatio: imgRatio, sortIndex: depth } });
-            if (parentId) newElements.push({ group: 'edges', data: { source: parentId, target: id } });
-            if (node.children && node.children.attached) { let sortCounter = 0; for (const child of node.children.attached) { await parseNode(child, id, sortCounter++); } }
-        };
-        await parseNode(rootTopic, null, 0); 
-        cy.startBatch();
-        cy.elements().remove(); 
-        cy.add(newElements); 
-        state.currentRootId = rootTopic.id; 
-        
-        cy.nodes().forEach(node => {
-            if (node.id() !== 'root' && !node.hasClass('box')) {
-                checkAutoRank(node);
-            }
-        });
-
-        refreshLayout(true);
-        cy.endBatch();
-        setTimeout(() => { state.hasUnsavedChanges = false; setUnsavedState(false); stateManager.resetStacks(); stateManager.resetStacks(); }, 100);
-      } catch (err) { alert(t('alert.xmind_error') + err); }
-    } else {
-      try { 
-          let actualBuf = buffer;
-          if (!(actualBuf instanceof Uint8Array)) {
-              actualBuf = new Uint8Array((buffer as any).type === 'Buffer' ? (buffer as any).data : buffer);
-          }
-          
-          let parsed;
-          try {
-              const unzipped = unzipSync(actualBuf);
-              const fileKey = Object.keys(unzipped).find(k => k.endsWith('.json'));
-              if (fileKey) parsed = JSON.parse(strFromU8(unzipped[fileKey]));
-              else throw new Error();
-          } catch (eZip) {
-              const decoder = new TextDecoder('utf-8');
-              const text = decoder.decode(actualBuf).replace(/^\uFEFF/, '');
-              parsed = JSON.parse(text); 
-          }
-
-          const baseName = fileName.replace('.phylo', '').replace('.json', '');
-          saveToRecentFiles(baseName, parsed, state.currentFilePath); 
-
-          cy.startBatch();
-          cy.elements().remove(); 
-          
-          let elementsToAdd = parsed.graph.elements;
-          if (elementsToAdd && !Array.isArray(elementsToAdd)) {
-              elementsToAdd = [...(elementsToAdd.nodes || []), ...(elementsToAdd.edges || [])];
-          }
-          cy.add(elementsToAdd); 
-          
-          state.currentRootId = parsed.state?.currentRootId || parsed.currentRootId || 'root';
-          refreshLayout(true); 
-          cy.endBatch();
-          
-          setTimeout(() => { state.hasUnsavedChanges = false; setUnsavedState(false); stateManager.resetStacks(); stateManager.resetStacks(); }, 100); 
-      } catch (err) { alert(t('alert.corrupt_file') + " : " + err); } 
-    }
-  }
-
-  (window as any)._loadOSFile = async (filePath: string) => {
-      const result = await window.electronAPI.readFileDirect(filePath);
-      if (result.success && result.data && result.fileName) {
-          await loadTreeFromBuffer(result.data as Uint8Array, result.fileName, result.filePath);
-          if (ui.welcomeOverlay) ui.welcomeOverlay.style.display = 'none';
-      } else if (result.error) {
-          alert(t('alert.file_read_error') + result.error);
-      }
-  };
 
   isAppReady = true;
+  bootDone(); // l'écran de chargement s'efface
   if (pendingOSFile) {
       (window as any)._loadOSFile(pendingOSFile);
       pendingOSFile = null;
-  }
-
-  async function handleFileOpen(file: File) {
-    const filePath = (file as any).path;
-    if (filePath && window.electronAPI && window.electronAPI.readFileDirect) {
-        const result = await window.electronAPI.readFileDirect(filePath);
-        if (result.success && result.data && result.fileName) {
-            await loadTreeFromBuffer(result.data as Uint8Array, result.fileName, result.filePath);
-        }
-    } else {
-        const arrayBuffer = await file.arrayBuffer();
-        await loadTreeFromBuffer(new Uint8Array(arrayBuffer), file.name, undefined);
-    }
-    ui.fileInput.value = ''; 
   }
 
   function openInlineEditor(node: any, isNewNode: boolean = false) {
@@ -2854,12 +2269,7 @@ const startApp = () => {
       node.data('name', newValue); 
       checkAutoRank(node);
       
-      if (ui.sidePanel.style.display === 'block' && state.activeNode && state.activeNode.id() === node.id()) { 
-          const isBoxNode = node.hasClass('box');
-          const newDisplayName = (!newValue || newValue === '') ? (isBoxNode ? 'Cadre' : t('default.unnamed_branch')) : newValue; 
-          const newExtinctMark = node.data('extinct') && !isBoxNode && newDisplayName !== t('default.unnamed_branch') ? '\u2020 ' : ''; 
-          ui.panelTitle.innerText = newExtinctMark + newDisplayName; 
-      }
+      if (state.activeNode && state.activeNode.id() === node.id()) refreshFicheTitle();
       
       if (document.body.contains(input)) {
           document.body.removeChild(input); 
@@ -2875,7 +2285,8 @@ const startApp = () => {
     setTimeout(() => {
         if (!document.body.contains(input)) return;
         input.focus(); 
-        input.setSelectionRange(input.value.length, input.value.length);
+        // Nom entièrement sélectionné : la saisie le remplace (comme renommer un fichier) ; Fin pour compléter.
+        input.select();
         input.addEventListener('blur', commitChanges);
     }, 50);
 
@@ -2906,14 +2317,9 @@ const startApp = () => {
 
   const updateChronoToolsUI = () => {
       if (ui.chronoTools) ui.chronoTools.style.display = state.layoutMode === 'chrono' ? 'flex' : 'none';
+      const romerTools = document.getElementById('romer-tools');
+      if (romerTools) romerTools.style.display = state.layoutMode === 'chrono' ? 'flex' : 'none';
       if (ui.chronoAxisSelect) ui.chronoAxisSelect.value = chronoAxisMode;
-      if (ui.btnChronoLanes) {
-          const on = chronoLanesEnabled;
-          ui.btnChronoLanes.innerText = on ? `${t('chrono.lanes.readable')} (${chronoLaneCount})` : t('chrono.lanes.faithful');
-          ui.btnChronoLanes.style.background = on ? 'rgba(33, 150, 243, 0.12)' : 'var(--bg-input)';
-          ui.btnChronoLanes.style.color = on ? '#2196F3' : 'var(--text-main)';
-          ui.btnChronoLanes.style.borderColor = on ? '#2196F3' : 'var(--border-color)';
-      }
       if (ui.btnChronoBounds) {
           const tight = chronoBoundsMode === 'tight';
           ui.btnChronoBounds.innerText = tight ? t('chrono.bounds.tight') : t('chrono.bounds.period');
@@ -2932,14 +2338,6 @@ const startApp = () => {
       };
   }
 
-  if (ui.btnChronoLanes) {
-      ui.btnChronoLanes.onclick = () => {
-          chronoLanesEnabled = !chronoLanesEnabled;
-          if (state.layoutMode === 'chrono') refreshLayout();
-          updateChronoToolsUI(); 
-      };
-  }
-
   if (ui.btnChronoBounds) {
       ui.btnChronoBounds.onclick = () => {
           chronoBoundsMode = chronoBoundsMode === 'tight' ? 'period' : 'tight';
@@ -2950,14 +2348,14 @@ const startApp = () => {
 
   const updateLayoutButtonsUI = () => {
       ui.btnLayoutNormal.style.background = state.layoutMode === 'standard' ? '#2196F3' : 'var(--bg-input)';
-      (ui.btnLayoutNormal.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'standard' ? 'invert(1) brightness(2)' : 'none';
+      (ui.btnLayoutNormal.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'standard' ? 'invert(1) brightness(2)' : 'var(--layout-icon-filter, none)';
       
       ui.btnLayoutComb.style.background = state.layoutMode === 'comb' ? '#2196F3' : 'var(--bg-input)';
-      (ui.btnLayoutComb.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'comb' ? 'invert(1) brightness(2)' : 'none';
+      (ui.btnLayoutComb.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'comb' ? 'invert(1) brightness(2)' : 'var(--layout-icon-filter, none)';
 
       if (ui.btnLayoutChrono) {
           ui.btnLayoutChrono.style.background = state.layoutMode === 'chrono' ? '#2196F3' : 'var(--bg-input)';
-          (ui.btnLayoutChrono.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'chrono' ? 'invert(1) brightness(2)' : 'none';
+          (ui.btnLayoutChrono.querySelector('img') as HTMLElement).style.filter = state.layoutMode === 'chrono' ? 'invert(1) brightness(2)' : 'var(--layout-icon-filter, none)';
       }
 
       updateChronoToolsUI();
@@ -2994,6 +2392,7 @@ const startApp = () => {
           saveSettings();
           ui.btnToggleAbbrev.innerText = state.appSettings.speciesFormat === 'full' ? t('topbar.btn.format.full') : t('topbar.btn.format.compact');
           refreshLayout(false);
+          refreshFicheTitle(); // le nom de la fiche suit le réglage
       };
   }
 
@@ -3001,12 +2400,15 @@ const startApp = () => {
       window.open('https://docs.google.com/document/d/1DDLvsZN7iBfwNCN5d-rpir2A8vN5jVssbKU1yYn0424/edit?usp=sharing', '_blank');
   };
   
+  /** Racine de la feuille qui contient le nœud : on remonte jusqu'à un début de feuille ou la racine de l'arbre. */
   const getSheetRootForNode = (node: any) => {
     let curr = node;
-    while (curr.length > 0 && curr.id() !== 'root' && !curr.data('hasNewSheet') && !curr.data('isFolder')) { 
-        curr = curr.incomers('node').first(); 
+    // Arrêt sur la racine réelle (sans parent), et pas sur l'identifiant « root » : un arbre importé
+    // d'XMind a une autre racine, et la boucle renvoyait alors « root », un nœud inexistant.
+    while (curr.length > 0 && !isTreeRoot(curr) && !curr.data('hasNewSheet') && !curr.data('isFolder')) {
+        curr = curr.incomers('node').filter((n: any) => !n.hasClass('box')).first();
     }
-    return curr.length > 0 ? curr.id() : 'root';
+    return curr.length > 0 ? curr.id() : findTreeRootId(cy);
   };
 
   let isCameraLocked = false;
@@ -3145,101 +2547,6 @@ const startApp = () => {
       } 
   });
 
-  ui.inpSynonymTarget.addEventListener('input', () => {
-      const val = ui.inpSynonymTarget.value.toLowerCase().trim();
-      ui.synonymDropdown.innerHTML = '';
-      if (!val) { 
-          ui.synonymDropdown.style.display = 'none'; 
-          if (state.activeNode) {
-              state.activeNode.data('synonymTargetId', null);
-              ui.panelSubtitleSynonym.style.display = 'none';
-              setUnsavedState(true);
-          }
-          return; 
-      }
-      const matches = cy.nodes().filter((n: any) => {
-          if (n.hasClass('box') || (state.activeNode && n.id() === state.activeNode.id())) return false;
-          return getNodeSearchStrings(n).some(s => s.includes(val));
-      });
-      if (matches.length > 0) {
-          ui.synonymDropdown.style.display = 'block';
-          matches.forEach((node: any) => {
-              const item = document.createElement('div');
-              item.style.cssText = "padding:6px 10px; cursor:pointer; border-bottom:1px solid var(--border-color);";
-              const displayItemName = LayoutEngine.getDynamicNodeName(node, state);
-              item.innerText = (node.data('extinct') && !displayItemName.startsWith('\u2020') ? '\u2020 ' : '') + displayItemName;
-              item.onmouseover = () => item.style.background = 'var(--bg-hover)';
-              item.onmouseout = () => item.style.background = 'transparent';
-              item.onclick = () => {
-                  ui.synonymDropdown.style.display = 'none';
-                  ui.inpSynonymTarget.value = node.data('name');
-                  if (state.activeNode) {
-                      saveState();
-                      state.activeNode.data('synonymTargetId', node.id());
-                      const targetName = LayoutEngine.getDynamicNodeName(node, state, 'full');
-                      ui.panelSubtitleSynonym.innerHTML = '= ' + targetName;
-                      ui.panelSubtitleSynonym.style.display = 'block';
-                      setUnsavedState(true);
-                  }
-              };
-              ui.synonymDropdown.appendChild(item);
-          });
-      } else {
-          ui.synonymDropdown.style.display = 'none';
-      }
-  });
-
-  ui.inpSynonymTarget.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-          e.preventDefault(); e.stopPropagation();
-          const val = ui.inpSynonymTarget.value.toLowerCase().trim();
-          if (!val) return;
-          const matches = cy.nodes().filter((n: any) => {
-              if (n.hasClass('box') || (state.activeNode && n.id() === state.activeNode.id())) return false;
-              return getNodeSearchStrings(n).some(s => s.includes(val));
-          });
-          if (matches.length >= 1) {
-              const node = matches[0];
-              ui.synonymDropdown.style.display = 'none';
-              ui.inpSynonymTarget.value = node.data('name');
-              if (state.activeNode) {
-                  saveState();
-                  state.activeNode.data('synonymTargetId', node.id());
-                  const targetName = LayoutEngine.getDynamicNodeName(node, state, 'full');
-                  ui.panelSubtitleSynonym.innerHTML = '= ' + targetName;
-                  ui.panelSubtitleSynonym.style.display = 'block';
-                  setUnsavedState(true);
-              }
-              ui.inpSynonymTarget.blur();
-          }
-      }
-  });
-
-  window.addEventListener('click', (e) => { 
-      if (e.target !== ui.inpSynonymTarget && ui.synonymDropdown && !ui.synonymDropdown.contains(e.target as Node)) { 
-          ui.synonymDropdown.style.display = 'none'; 
-      } 
-  });
-
-  ui.panelSubtitleSynonym.onclick = () => {
-      if (!state.activeNode) return;
-      const synId = state.activeNode.data('synonymTargetId');
-      if (synId) {
-          const targetNode = cy.$id(synId);
-          if (targetNode.length > 0) {
-              const nodeRootId = getSheetRootForNode(targetNode); 
-              if (nodeRootId !== state.currentRootId) { 
-                  state.currentRootId = nodeRootId; 
-                  refreshLayout(false); 
-              } 
-              cy.$(':selected').unselect();
-              targetNode.select();
-              focusCameraOnNode(targetNode);
-              openSidePanelForNode(targetNode);
-          }
-      }
-  };
-
   setTimeout(() => { state.isInitializing = false; }, 800);
   
   window.addEventListener('beforeunload', (e) => { 
@@ -3260,234 +2567,6 @@ const startApp = () => {
           }, 10);
       } 
   });
-
-  document.body.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
-  document.body.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); });
-  document.body.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) { handleFileOpen(e.dataTransfer.files[0]); ui.welcomeOverlay.style.display = 'none'; } });
-
-  const syncTransparentOption = () => {
-      if (!ui.exportTransparent || !ui.exportTransparentRow) return;
-      const alpha = (ui.exportSelect.value === 'png' || ui.exportSelect.value === 'svg');
-      ui.exportTransparent.disabled = !alpha;
-      ui.exportTransparentRow.style.opacity = alpha ? '1' : '0.45';
-      ui.exportTransparentRow.style.cursor = alpha ? 'pointer' : 'not-allowed';
-  };
-  ui.exportSelect?.addEventListener('change', syncTransparentOption);
-  syncTransparentOption();
-
-  ui.btnExport.onclick = async () => {
-      cy.elements().unselect();
-      const format = ui.exportSelect.value; 
-      const scaleFactor = parseInt(ui.exportScaleSelect.value) || 1; 
-      const supportsAlpha = (format === 'png' || format === 'svg');
-      const wantTransparent = supportsAlpha && ui.exportTransparent?.checked !== false;
-      const exportBg = wantTransparent ? 'transparent' : '#ffffff'; 
-      const fileName = `phylogenie_export.${format}`;
-      
-      let tempChronoElements: any = cy.collection();
-      let chronoLanesNeutralized = false;
-
-      const finishChronoExport = () => {
-          if (state.layoutMode !== 'chrono') return;
-          cy.remove(tempChronoElements);
-          if (chronoLanesNeutralized) {
-              chronoLanesNeutralized = false;
-              refreshLayout(); 
-          }
-      };
-
-      if (state.layoutMode === 'chrono') {
-          const parseMa = (val: any) => parseFloat(String(val).replace(',', '.'));
-
-          if (chronoLanesEnabled) {
-              chronoLanesNeutralized = true;
-              cy.edges().style('taxi-turn', 1);
-          }
-          const PERIOD_NAMES = CHRONO_PERIOD_KEYS.map(k => t(k));
-          const themeTextColor = getComputedStyle(document.body).getPropertyValue('--text-main').trim() || '#000000';
-          
-          const bb = cy.elements(':visible').not('.export-chrono').boundingBox();
-          const treeTopY = bb.y1 === Infinity ? 0 : bb.y1 - 50;
-          const treeBottomY = bb.y2 === -Infinity ? 500 : bb.y2;
-          const rulerStartY = treeBottomY + 80; 
-          const bgHeight = rulerStartY - treeTopY;
-          const bgCenterY = treeTopY + (bgHeight / 2);
-
-          const timelineNodes: any[] = [];
-          const drawnLabelXs: number[] = [];
-
-          const firstStageEnd = parseMa(GEO_DETAILS[0]?.subs?.[0]?.e ?? GEO_DETAILS[0]?.end); 
-          if (!isNaN(firstStageEnd) && firstStageEnd >= globalTimeMin && firstStageEnd <= globalTimeMax) {
-              drawnLabelXs.push(chronoAgeToX(firstStageEnd));
-          }
-
-          GEO_DETAILS.forEach((period: any, idx: number) => {
-              if (period.subs && period.subs.length > 0) {
-                  period.subs.forEach((sub: any, i: number) => {
-                      const sStart = parseMa(sub.s);
-                      const sEnd = parseMa(sub.e);
-                      if (isNaN(sStart) || isNaN(sEnd)) return;
-                      
-                      if (sEnd >= globalTimeMax || sStart <= globalTimeMin) return;
-                      const renderStart = Math.min(globalTimeMax, sStart);
-                      const renderEnd = Math.max(globalTimeMin, sEnd);
-                      if (renderStart <= renderEnd) return;
-                      
-                      const xStart = chronoAgeToX(renderStart);
-                      const xEnd = chronoAgeToX(renderEnd);
-                      const w = Math.max(1, xEnd - xStart);
-                      const cx = (xStart + xEnd) / 2; 
-                      
-                      const shadeAmount = (i / Math.max(1, period.subs.length - 1)) * 40 - 20;
-                      const stageColor = adjustColorLightness(period.color, shadeAmount);
-                      const stageName = t(sub.k) !== sub.k ? t(sub.k) : sub.k.replace('geo.', '');
-                      
-                      const stageAbbr = stageName.length > 4 ? stageName.substring(0, 3) + '.' : stageName;
-                      let displayLabel = '';
-                      if (w > 50) {
-                          displayLabel = stageName;
-                      } else if (w > 22) {
-                          displayLabel = stageAbbr;
-                      }
-                      
-                      timelineNodes.push({
-                          group: 'nodes', classes: 'export-chrono', data: { id: 'export-bg-sub-' + idx + '-' + i, name: 'bg' },
-                          position: { x: cx, y: bgCenterY },
-                          style: { 'width': w, 'height': bgHeight, 'shape': 'rectangle', 'background-color': stageColor, 'background-opacity': 0.12, 'border-width': 0, 'z-index': -999, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-                      });
-                      
-                      const tickX = chronoAgeToX(renderStart);
-                      timelineNodes.push({
-                          group: 'nodes', classes: 'export-chrono', data: { id: 'export-tick-sub-' + idx + '-' + i, name: 'tick' },
-                          position: { x: tickX, y: bgCenterY },
-                          style: { 'width': 1, 'height': bgHeight, 'shape': 'rectangle', 'background-color': themeTextColor, 'background-opacity': 0.3, 'border-width': 0, 'padding': 0, 'z-index': -998, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-                      });
-
-                      timelineNodes.push({
-                          group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-sub-' + idx + '-' + i, name: stageName },
-                          position: { x: cx, y: rulerStartY + 20 }, 
-                          style: { 'width': w, 'height': 40, 'shape': 'rectangle', 'background-color': stageColor, 'background-opacity': 1, 'border-width': 0, 'padding': 0, 'label': displayLabel, 'font-size': 10, 'text-valign': 'center', 'text-halign': 'center', 'color': '#000000', 'font-weight': 'bold', 'text-wrap': 'ellipsis', 'text-max-width': Math.max(1, w - 4), 'z-index': 100, 'z-index-compare': 'manual' }
-                      });
-                      
-                      timelineNodes.push({
-                          group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-tick-' + idx + '-' + i, name: 'rulertick' },
-                          position: { x: tickX, y: rulerStartY + 20 },
-                          style: { 'width': 1.5, 'height': 40, 'shape': 'rectangle', 'background-color': '#000000', 'background-opacity': 1, 'border-width': 0, 'padding': 0, 'z-index': 102, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-                      });
-
-                      if (drawnLabelXs.every(dx => Math.abs(dx - tickX) > 28)) {
-                          drawnLabelXs.push(tickX);
-                          timelineNodes.push({
-                              group: 'nodes', classes: 'export-chrono', data: { id: 'export-label-sub-' + idx + '-' + i, name: 'label' },
-                              position: { x: tickX, y: rulerStartY + 5 },
-                              style: { 'width': 0.1, 'height': 0.1, 'background-opacity': 0, 'border-width': 0, 'label': sStart.toString(), 'font-size': 9, 'font-weight': 'bold', 'color': '#000000', 'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -2, 'z-index': 105, 'z-index-compare': 'manual' }
-                          });
-                      }
-                  });
-              }
-
-              const pStart = parseMa(period.start);
-              const pEnd = parseMa(period.end);
-              if (!isNaN(pStart) && !isNaN(pEnd) && pEnd < globalTimeMax && pStart > globalTimeMin) {
-                  const renderStart = Math.min(globalTimeMax, pStart);
-                  const renderEnd = Math.max(globalTimeMin, pEnd);
-                  if (renderStart > renderEnd) {
-                      const xStart = chronoAgeToX(renderStart);
-                      const xEnd = chronoAgeToX(renderEnd);
-                      const w = Math.max(1, xEnd - xStart);
-                      const cx = (xStart + xEnd) / 2;
-                      const pName = PERIOD_NAMES[idx] || "";
-                      
-                      const pAbbr = pName.length > 4 ? pName.substring(0, 3) + '.' : pName;
-                      let pDisplayLabel = '';
-                      if (w > 60) {
-                          pDisplayLabel = pName;
-                      } else if (w > 25) {
-                          pDisplayLabel = pAbbr;
-                      }
-                      
-                      timelineNodes.push({
-                          group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-per-' + idx, name: pName },
-                          position: { x: cx, y: rulerStartY + 50 }, 
-                          style: { 'width': w, 'height': 20, 'shape': 'rectangle', 'background-color': period.color, 'background-opacity': 1, 'border-width': 0, 'padding': 0, 'label': pDisplayLabel, 'font-size': 11, 'text-valign': 'center', 'text-halign': 'center', 'color': '#000000', 'font-weight': 'bold', 'text-wrap': 'ellipsis', 'text-max-width': Math.max(1, w - 4), 'z-index': 101, 'z-index-compare': 'manual' }
-                      });
-
-                      const tickX = chronoAgeToX(renderStart);
-                      timelineNodes.push({
-                          group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-pertick-' + idx, name: 'pertick' },
-                          position: { x: tickX, y: rulerStartY + 50 },
-                          style: { 'width': 2, 'height': 20, 'shape': 'rectangle', 'background-color': '#000000', 'background-opacity': 1, 'border-width': 0, 'padding': 0, 'z-index': 102, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-                      });
-                  }
-              }
-          });
-
-          if (!isNaN(firstStageEnd) && firstStageEnd >= globalTimeMin && firstStageEnd <= globalTimeMax) {
-              const tickX = chronoAgeToX(firstStageEnd);
-              
-              timelineNodes.push({
-                  group: 'nodes', classes: 'export-chrono', data: { id: 'export-tick-zero', name: 'tick' },
-                  position: { x: tickX, y: bgCenterY },
-                  style: { 'width': 1, 'height': bgHeight, 'shape': 'rectangle', 'background-color': themeTextColor, 'background-opacity': 0.3, 'border-width': 0, 'padding': 0, 'z-index': -998, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-              });
-
-              timelineNodes.push({
-                  group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-tick-zero', name: 'rulertick' },
-                  position: { x: tickX, y: rulerStartY + 30 },
-                  style: { 'width': 2, 'height': 60, 'shape': 'rectangle', 'background-color': '#000000', 'background-opacity': 1, 'border-width': 0, 'padding': 0, 'z-index': 102, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-              });
-
-              timelineNodes.push({
-                  group: 'nodes', classes: 'export-chrono', data: { id: 'export-label-zero', name: '0' },
-                  position: { x: tickX, y: rulerStartY + 5 },
-                  style: { 'width': 0.1, 'height': 0.1, 'background-opacity': 0, 'border-width': 0, 'label': firstStageEnd.toString(), 'color': '#000000', 'font-weight': 'bold', 'font-size': 9, 'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -2, 'z-index': 105, 'z-index-compare': 'manual' }
-              });
-          }
-          
-          const xOldest = chronoAgeToX(globalTimeMax);
-          const xYoungest = chronoAgeToX(globalTimeMin);
-          const totalW = Math.max(1, xYoungest - xOldest);
-          const totalCx = (xOldest + xYoungest) / 2;
-
-          timelineNodes.push({
-              group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-hline-top', name: 'hline' },
-              position: { x: totalCx, y: rulerStartY },
-              style: { 'width': totalW, 'height': 2.5, 'shape': 'rectangle', 'background-color': '#000000', 'border-width': 0, 'padding': 0, 'z-index': 105, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-          });
-          timelineNodes.push({
-              group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-hline-mid', name: 'hline' },
-              position: { x: totalCx, y: rulerStartY + 40 },
-              style: { 'width': totalW, 'height': 2, 'shape': 'rectangle', 'background-color': '#000000', 'border-width': 0, 'padding': 0, 'z-index': 105, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-          });
-          timelineNodes.push({
-              group: 'nodes', classes: 'export-chrono', data: { id: 'export-ruler-hline-bot', name: 'hline' },
-              position: { x: totalCx, y: rulerStartY + 60 },
-              style: { 'width': totalW, 'height': 2.5, 'shape': 'rectangle', 'background-color': '#000000', 'border-width': 0, 'padding': 0, 'z-index': 105, 'z-index-compare': 'manual', 'events': 'no', 'label': '' }
-          });
-
-          tempChronoElements = cy.add(timelineNodes);
-      }
-
-      if (format === 'png' || format === 'jpeg') {
-        const b64 = format === 'png' 
-          ? cy.png({ full: true, bg: exportBg, scale: scaleFactor }) 
-          : cy.jpg({ full: true, bg: '#ffffff', scale: scaleFactor });
-        
-        finishChronoExport(); 
-        window.electronAPI.saveExport(b64, fileName, format);
-        
-      } else if (format === 'svg') {
-        const svgContent = (cy as any).svg({ full: true, bg: exportBg, scale: scaleFactor }); 
-        
-        finishChronoExport(); 
-        window.electronAPI.saveExport(svgContent, fileName, format);
-        
-      } else if (format === 'pdf') {
-        const b64 = cy.png({ full: true, bg: '#ffffff', scale: scaleFactor }); 
-        finishChronoExport(); 
-        exportGraphToPdf(b64, fileName, window.electronAPI);
-      }
-  };
 
   document.getElementById('cmenu-compile')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode) { ui.compileModal.style.display = 'flex'; } });
   document.getElementById('compile-cancel')?.addEventListener('click', () => ui.compileModal.style.display = 'none');
@@ -3572,20 +2651,6 @@ const startApp = () => {
           await saveExcelFile(state.currentXlsxTitle, cols, state.currentXlsxRows, window.electronAPI);
       });
   })();
-  
-  ui.btnExportFiche.onclick = async () => {
-    if (!state.activeNode) return;
-    
-    let synNameStr = '';
-    const synId = state.activeNode.data('synonymTargetId');
-    if (synId) {
-        const tNode = cy.$id(synId);
-        if (tNode.length > 0) synNameStr = '= ' + LayoutEngine.getDynamicNodeName(tNode, state, 'full');
-    }
-
-    const lineageStr = buildLineageString(state.activeNode).replace(/<[^>]+>/g, '');
-    await generateFichePdf(state.activeNode.data(), state.appSettings, lineageStr, synNameStr, GEO_DETAILS, window.electronAPI);
-  };
 
   document.getElementById('cmenu-box-add')?.addEventListener('click', (e) => { 
       e.stopPropagation(); ui.contextMenu.style.display = 'none'; 
@@ -3733,150 +2798,12 @@ const startApp = () => {
       }
   });
 
-  const btnToggleRibbon = document.getElementById('btn-toggle-ribbon');
-  const btnCloseRibbon = document.getElementById('btn-close-ribbon');
-
-  if (btnToggleRibbon && btnCloseRibbon) {
-      btnToggleRibbon.onclick = () => {
-          const isHidden = ui.styleMenu.style.display === 'none';
-          ui.styleMenu.style.display = isHidden ? 'flex' : 'none';
-          btnToggleRibbon.style.background = isHidden ? 'rgba(33, 150, 243, 0.2)' : 'rgba(33, 150, 243, 0.1)';
-          
-          if (isHidden) {
-              const selected = cy.$('node:selected');
-              if (selected.length === 1) {
-                  updateRibbonForNode(selected[0]);
-              }
-          }
-          
-          setTimeout(() => cy.fit(cy.nodes(':visible').not('.box, #ghost-node, .strato-bg, .export-chrono'), 50), 50); 
-      };
-      
-      btnCloseRibbon.onclick = () => {
-          ui.styleMenu.style.display = 'none';
-          btnToggleRibbon.style.background = 'rgba(33, 150, 243, 0.1)';
-          setTimeout(() => cy.fit(cy.nodes(':visible').not('.box, #ghost-node, .strato-bg, .export-chrono'), 50), 50);
-      };
-  }
+  // (Ancien bouton « Outils de style » : remplacé par l'onglet Style du ruban, voir ribbon.ts.)
 
   document.getElementById('cmenu-edit')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode && !state.activeNode.hasClass('box')) openSidePanelForNode(state.activeNode); });
   document.getElementById('cmenu-sheet-new')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode && !state.activeNode.hasClass('box')) { saveState(); state.activeNode.data('hasNewSheet', true); refreshLayout(); } });
   document.getElementById('cmenu-sheet-open')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode && !state.activeNode.hasClass('box')) { saveState(); state.currentRootId = state.activeNode.id(); refreshLayout(true); } });
   document.getElementById('cmenu-sheet-remove')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode && !state.activeNode.hasClass('box')) { saveState(); state.activeNode.data('hasNewSheet', false); refreshLayout(); } });
-  document.getElementById('cmenu-cut')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode && !state.activeNode.hasClass('box')) cutClade(state.activeNode); });
-  document.getElementById('cmenu-copy')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode && !state.activeNode.hasClass('box')) copyClade(state.activeNode); });
-  document.getElementById('cmenu-paste')?.addEventListener('click', (e) => { e.stopPropagation(); ui.contextMenu.style.display = 'none'; if (state.activeNode && state.clipboard && !state.activeNode.hasClass('box')) pasteClade(state.activeNode); });
-  document.getElementById('cmenu-graft')?.addEventListener('click', (e) => { 
-    e.stopPropagation(); ui.contextMenu.style.display = 'none'; 
-    if (state.activeNode && !state.activeNode.hasClass('box')) { 
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.json,.phylo,.xmind';
-      input.onchange = (ev) => {
-        const file = (ev.target as HTMLInputElement).files?.[0];
-        if (file) handleGraft(file, state.activeNode);
-      };
-      input.click(); 
-    } 
-  });
-
-  const inputKeys = Object.keys(ui.formInputs);
-  ui.btnUploadSheetImage.onclick = () => ui.inpSheetImageFile.click();
-  
-  ui.inpSheetImageFile.onchange = (e: any) => {
-      const file = e.target.files?.[0];
-      if (file && state.activeNode && !state.activeNode.hasClass('box')) {
-          const reader = new FileReader();
-          reader.onload = async (eLoad) => {
-              const base64 = eLoad.target?.result as string;
-              const ratio = await getImageRatio(base64); 
-              saveState();
-              state.activeNode.data('sheetImage', base64);
-              state.activeNode.data('sheetImageRatio', ratio);
-              ui.previewSheetImage.src = base64;
-              ui.previewSheetImage.style.display = 'block';
-              ui.btnClearSheetImage.style.display = 'block';
-              
-              const creditsField = document.getElementById('inp-imgCredits');
-              if (creditsField) creditsField.style.display = 'block';
-              
-              setUnsavedState(true);
-          };
-          reader.readAsDataURL(file);
-      }
-      ui.inpSheetImageFile.value = ''; 
-  };
-
-  ui.btnClearSheetImage.onclick = () => {
-      if (state.activeNode && !state.activeNode.hasClass('box')) {
-          saveState();
-          state.activeNode.data('sheetImage', '');
-          ui.previewSheetImage.src = '';
-          ui.previewSheetImage.style.display = 'none';
-          ui.btnClearSheetImage.style.display = 'none';
-          
-          const creditsField = document.getElementById('inp-imgCredits');
-          if (creditsField) creditsField.style.display = 'none';
-          
-          setUnsavedState(true);
-      }
-  };
-  
-  ui.btnOpenLinkedFile.onclick = async () => {
-      if (!state.activeNode || state.activeNode.hasClass('box')) return;
-      
-      const linkedPath = state.activeNode.data('linkedFilePath');
-      const linkedName = state.activeNode.data('linkedFileName');
-      if (!linkedName) return;
-
-      if (state.hasUnsavedChanges) {
-          if (confirm(t('confirm.save_before_switch'))) {
-              await executeSave(false);
-          }
-      }
-
-      const getDirectory = (filePath: string) => {
-          if (!filePath) return '';
-          const sep = filePath.includes('\\') ? '\\' : '/';
-          const parts = filePath.split(sep);
-          parts.pop();
-          return parts.join(sep) + sep;
-      };
-
-      let loaded = false;
-
-      if (linkedPath) {
-          const res1 = await window.electronAPI.readFileDirect(linkedPath);
-          if (res1.success && res1.data) {
-              await loadTreeFromBuffer(res1.data as Uint8Array, res1.fileName!, res1.filePath);
-              loaded = true;
-          }
-      }
-
-      if (!loaded && state.currentFilePath) {
-          const dir = getDirectory(state.currentFilePath);
-          const fallbackPath = dir + linkedName;
-          const res2 = await window.electronAPI.readFileDirect(fallbackPath);
-          if (res2.success && res2.data) {
-              state.activeNode.data('linkedFilePath', res2.filePath); 
-              await loadTreeFromBuffer(res2.data as Uint8Array, res2.fileName!, res2.filePath);
-              loaded = true;
-          }
-      }
-
-      if (!loaded) {
-          alert(t('alert.link_broken1') + linkedName + t('alert.link_broken2'));
-          const res3 = await window.electronAPI.openFile();
-          if (res3.success && res3.data && res3.fileName) {
-              state.activeNode.data('linkedFilePath', res3.filePath);
-              state.activeNode.data('linkedFileName', res3.fileName);
-              await loadTreeFromBuffer(res3.data as Uint8Array, res3.fileName, res3.filePath);
-          }
-      }
-      
-      if (ui.welcomeOverlay) ui.welcomeOverlay.style.display = 'none';
-      closeSidePanel();
-  };
 
   const showCustomAlert = (msg: string) => {
       const overlay = document.createElement('div');
@@ -3897,835 +2824,11 @@ const startApp = () => {
       }
   };
 
-  inputKeys.forEach((key, index) => { 
-      const inputEl = (ui.formInputs as any)[key] as HTMLElement;
-      
-      inputEl.addEventListener('change', (e: any) => {
-          if (state.activeNode && !state.activeNode.hasClass('box')) {
-              const val = e.target.value;
-              state.activeNode.data(key, val);
-              
-              if (key === 'status') {
-                  ui.containerSynonym.style.display = val === 'Synonyme' ? 'flex' : 'none';
-              }
-
-              if (key === 'period') {
-                  updateTimeline(val);
-                  if (val && val.trim() !== '') {
-                      const parseMa = (s: string) => parseFloat(s.replace(',', '.'));
-                      const getStartAge = (p: string) => {
-                          if (!p) return null;
-                          const rangeMatch = p.match(/([\d.,]+)\s*-\s*([\d.,]+)/);
-                          const singleMatch = p.match(/([\d.,]+)/);
-                          if (rangeMatch) return Math.max(parseMa(rangeMatch[1]), parseMa(rangeMatch[2]));
-                          if (singleMatch) return parseMa(singleMatch[1]);
-                          return null;
-                      };
-
-                      const newAge = getStartAge(val);
-                      if (newAge !== null) {
-                          let isParadox = false;
-                          let message = '';
-                          const parent = state.activeNode.incomers('node');
-                          if (parent.length > 0) {
-                              const pAge = getStartAge(parent[0].data('period'));
-                              if (pAge !== null && pAge < newAge) { 
-                                  isParadox = true;
-                                  message = t('alert.paradox_parent1') + pAge + t('alert.paradox_parent2') + newAge + " Ma).";
-                              }
-                          }
-                          if (!isParadox) {
-                              state.activeNode.outgoers('node').forEach((child: any) => {
-                                  if (isParadox) return;
-                                  const cAge = getStartAge(child.data('period'));
-                                  if (cAge !== null && cAge > newAge) {
-                                      isParadox = true;
-                                      message = t('alert.paradox_child1') + cAge + t('alert.paradox_child2') + newAge + " Ma).";
-                                  }
-                              });
-                          }
-                          if (isParadox) {
-                              const inputNative = inputEl as HTMLInputElement;
-                              inputNative.value = '';
-                              state.activeNode.data('period', '');
-                              updateTimeline('');
-                              refreshLayout(false);
-                              showCustomAlert(message);
-                              return; 
-                          }
-                      }
-                  }
-              }
-              
-              refreshLayout();
-              setUnsavedState(true);
-              saveState();
-          }
-      });
-
-      inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
-          if (e.key === 'Enter') {
-              e.stopPropagation(); 
-              if (inputEl.tagName === 'INPUT' || inputEl.tagName === 'SELECT') {
-                  e.preventDefault(); 
-                  inputEl.blur(); 
-                  
-                  const nextKey = inputKeys[index + 1];
-                  if (nextKey) {
-                      const nextEl = (ui.formInputs as any)[nextKey] as HTMLElement;
-                      nextEl.focus(); 
-                      if (nextEl.tagName === 'INPUT') {
-                          (nextEl as HTMLInputElement).select();
-                      }
-                  }
-              }
-          }
-      });
-  });
-  
-  container.addEventListener('wheel', (e: WheelEvent) => { 
-      e.preventDefault(); 
-      
-      const isMouseWheel = e.deltaMode !== 0 || (Math.abs(e.deltaY) >= 50 && e.deltaX === 0);
-      
-      if (e.ctrlKey || e.metaKey || isMouseWheel) {
-          const direction = e.deltaY > 0 ? -1 : 1; 
-          const baseSpeed = Math.abs(e.deltaY) >= 50 ? 0.04 : 0.02;
-          const zoomSpeed = baseSpeed * state.appSettings.zoomSensitivity; 
-          
-          let currentZoom = cy.zoom(); 
-          let newZoom = currentZoom * (1 + direction * zoomSpeed); 
-          
-          newZoom = Math.max(0.1, Math.min(newZoom, 4)); 
-          
-          cy.zoom({ level: newZoom, renderedPosition: { x: e.offsetX, y: e.offsetY } }); 
-      } 
-      else {
-          const pan = cy.pan();
-          cy.pan({ x: pan.x - e.deltaX * 1.5, y: pan.y - e.deltaY * 1.5 });
-      }
-  }, { passive: false });
-
-  const autoPanLoop = () => {
-      if (!isBoxSelecting) {
-          autoPanId = null;
-          return;
-      }
-
-      const threshold = 60; 
-      const speed = 15; 
-
-      let panX = 0;
-      let panY = 0;
-
-      if (currentMouseX < threshold) panX = speed;
-      else if (currentMouseX > window.innerWidth - threshold) panX = -speed;
-
-      if (currentMouseY < threshold) panY = speed;
-      else if (currentMouseY > window.innerHeight - threshold) panY = -speed;
-
-      if (panX !== 0 || panY !== 0) {
-          cy.panBy({ x: panX, y: panY });
-          
-          boxStartX += panX;
-          boxStartY += panY;
-
-          ui.customBox.style.left = Math.min(boxStartX, currentMouseX) + 'px';
-          ui.customBox.style.top = Math.min(boxStartY, currentMouseY) + 'px';
-          ui.customBox.style.width = Math.abs(currentMouseX - boxStartX) + 'px';
-          ui.customBox.style.height = Math.abs(currentMouseY - boxStartY) + 'px';
-      }
-
-      autoPanId = requestAnimationFrame(autoPanLoop);
-  };
-
-  cy.on('grab', 'node', (e: any) => {
-    const target = e.target as any;
-    if (target.id() === state.currentRootId || target.hasClass('box')) return;
-    
-    draggedNode = cy.$id(target.id()); 
-    
-    const incomingEdges = target.incomers('edge');
-    currentParentId = incomingEdges.length > 0 ? incomingEdges[0].data('source') : null;
-
-    const successors = target.successors('node');
-
-    possibleTargets = cy.nodes(':visible').filter((n: any) => 
-        !n.hasClass('box') && n.id() !== target.id() && !successors.contains(n)
-    ).map((n: any) => ({
-        node: n,
-        pos: n.position()
-    }));
-
-    const startPos = target.position();
-    draggedDescendants = successors.map((n: any) => {
-        const p = n.position();
-        return { node: n, dx: p.x - startPos.x, dy: p.y - startPos.y };
-    });
-  });
-
-  cy.on('drag', 'node', (e: any) => {
-    if (!draggedNode || draggedNode.id() !== (e.target as any).id()) return;
-    
-    if (!draggedNode.data('isDraggingReal')) {
-        draggedNode.data('isDraggingReal', true);
-        draggedNode.incomers('edge').style('opacity', 0);
-    }
-
-    const cursorDragPos = (e.target as any).position(); 
-
-    draggedDescendants.forEach(desc => {
-        desc.node.position({
-            x: cursorDragPos.x + desc.dx,
-            y: cursorDragPos.y + desc.dy
-        });
-    });
-
-    let targetParent: any = null;
-    let minDistance = Infinity;
-
-    possibleTargets.forEach((target) => {
-      const distance = Math.hypot(target.pos.x - cursorDragPos.x, target.pos.y - cursorDragPos.y);
-      if (distance < minDistance) {
-        minDistance = distance;
-        targetParent = target.node;
-      }
-    });
-
-    if (targetParent && draggedNode.successors('node').contains(targetParent)) {
-        targetParent = null;
-    }
-
-    currentDragTarget = targetParent;
-
-    if (currentDragTarget) {
-        let gNode = cy.$id('ghost-node');
-        if (gNode.length === 0) {
-            cy.add({ group: 'nodes', data: { id: 'ghost-node', name: '' } });
-            gNode = cy.$id('ghost-node');
-            gNode.style({ 'width': '1px', 'height': '1px', 'background-opacity': 0, 'border-width': 0, 'label': '' });
-        }
-
-        const myWidth = currentDragTarget.data('width') || 100;
-        const rightX = currentDragTarget.position().x + (myWidth / 2);
-        const childrenLeftX = rightX + 40; 
-        const draggedWidth = draggedNode.data('width') || 100;
-        const targetX = childrenLeftX + (draggedWidth / 2);
-
-        let targetY = currentDragTarget.position().y;
-        
-        const children = currentDragTarget.outgoers('node').filter((n:any) => !n.hasClass('box') && n.id() !== draggedNode.id() && n.id() !== 'ghost-node');
-        
-        if (children.length > 0) {
-            let maxY = -Infinity;
-            children.forEach((c: any) => {
-                if (c.position().y > maxY) maxY = c.position().y;
-            });
-            const draggedHeight = draggedNode.data('height') || 24;
-            targetY = maxY + Math.max(35, draggedHeight + 15);
-        }
-
-        gNode.position({ x: targetX, y: targetY });
-
-        if (!ghostEdge) {
-            ghostEdge = cy.add({ group: 'edges', data: { id: 'ghost-edge', source: currentDragTarget.id(), target: 'ghost-node' } });
-            ghostEdge.style({ 'line-color': '#2196F3', 'line-style': 'dashed', 'opacity': 0.8, 'width': 4, 'curve-style': 'taxi', 'taxi-direction': 'rightward' });
-        } else if (ghostEdge.data('source') !== currentDragTarget.id()) {
-            cy.remove(ghostEdge);
-            ghostEdge = cy.add({ group: 'edges', data: { id: 'ghost-edge', source: currentDragTarget.id(), target: 'ghost-node' } });
-            ghostEdge.style({ 'line-color': '#2196F3', 'line-style': 'dashed', 'opacity': 0.8, 'width': 4, 'curve-style': 'taxi', 'taxi-direction': 'rightward' });
-        }
-    } else {
-        if (ghostEdge) { cy.remove(ghostEdge); ghostEdge = null; }
-        const gNode = cy.$id('ghost-node');
-        if (gNode.length > 0) cy.remove(gNode);
-    }
-  });
-
-  cy.on('free', 'node', (e: any) => {
-    const target = e.target as any;
-    
-    target.incomers('edge').removeStyle('opacity');
-    target.data('isDraggingReal', false); 
-
-    if (!draggedNode || draggedNode.id() !== target.id()) return;
-    
-    draggedNode = null;
-    possibleTargets = [];
-    draggedDescendants = []; 
-    
-    if (ghostEdge) { cy.remove(ghostEdge); ghostEdge = null; }
-    const gNode = cy.$id('ghost-node');
-    if (gNode.length > 0) cy.remove(gNode);
-
-    if (currentDragTarget && currentDragTarget.id() !== currentParentId) {
-        saveState();
-        
-        const incomingEdges = target.incomers('edge').filter((edge: any) => edge.id() !== 'ghost-edge');
-        if (incomingEdges.length > 0) cy.remove(incomingEdges);
-        
-        cy.add({ group: 'edges', data: { source: currentDragTarget.id(), target: target.id() } });
-        checkAutoRank(target);
-
-        propagateBoxMembership(currentDragTarget, target.union(target.successors('node:not(.box)')).toArray());
-    }
-
-    currentDragTarget = null;
-    currentParentId = null;
-    refreshLayout(); 
-  });
-
-  container.addEventListener('mousedown', (e: MouseEvent) => {
-      if (e.button === 1) { 
-          e.preventDefault();
-          isMiddlePanning = true;
-          boxStartX = e.clientX; 
-          boxStartY = e.clientY;
-          container.style.cursor = 'grabbing';
-      }
-  });
-
-  cy.on('mousedown', (e) => {
-    const originalEvent = e.originalEvent as MouseEvent;
-    if (e.target === cy && originalEvent) {
-      if (originalEvent.button === 0) { 
-        isBoxSelecting = true;
-        boxStartX = originalEvent.clientX;
-        boxStartY = originalEvent.clientY;
-        currentMouseX = boxStartX;
-        currentMouseY = boxStartY;
-        
-        ui.customBox.style.left = boxStartX + 'px';
-        ui.customBox.style.top = boxStartY + 'px';
-        ui.customBox.style.width = '0px';
-        ui.customBox.style.height = '0px';
-        ui.customBox.style.display = 'block';
-
-        if (!autoPanId) autoPanLoop();
-      } 
-    }
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (isMiddlePanning) {
-      const dx = e.clientX - boxStartX;
-      const dy = e.clientY - boxStartY;
-      cy.panBy({ x: dx, y: dy });
-      boxStartX = e.clientX;
-      boxStartY = e.clientY;
-    } else if (isBoxSelecting) {
-      currentMouseX = e.clientX; 
-      currentMouseY = e.clientY;
-      ui.customBox.style.left = Math.min(boxStartX, currentMouseX) + 'px';
-      ui.customBox.style.top = Math.min(boxStartY, currentMouseY) + 'px';
-      ui.customBox.style.width = Math.abs(currentMouseX - boxStartX) + 'px';
-      ui.customBox.style.height = Math.abs(currentMouseY - boxStartY) + 'px';
-    }
-  });
-
-  window.addEventListener('mouseup', (e) => {
-    if (e.button === 1 && isMiddlePanning) {
-      isMiddlePanning = false;
-      container.style.cursor = 'default';
-    } else if (isBoxSelecting) {
-      isBoxSelecting = false; 
-      ui.customBox.style.display = 'none';
-
-      if (autoPanId) {
-          cancelAnimationFrame(autoPanId);
-          autoPanId = null;
-      }
-      const dx = Math.abs(e.clientX - boxStartX); 
-      const dy = Math.abs(e.clientY - boxStartY);
-
-      if (dx > 5 || dy > 5) {
-        const rect = container.getBoundingClientRect();
-        const left = Math.min(boxStartX, e.clientX) - rect.left; 
-        const right = Math.max(boxStartX, e.clientX) - rect.left;
-        const top = Math.min(boxStartY, e.clientY) - rect.top; 
-        const bottom = Math.max(boxStartY, e.clientY) - rect.top;
-
-        if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-          cy.nodes().unselect();
-        }
-
-        cy.nodes().filter((n:any) => !n.hasClass('box') && n.visible()).forEach((n:any) => {
-          const p = n.renderedPosition();
-          if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) {
-            if (e.shiftKey) {
-              n.unselect();
-            } else {
-              n.select();
-            }
-          }
-        });
-        updateCounters();
-      }
-    }
-  });
-
   cy.on('remove', 'node', (e) => {
       if (isEditing && editedNode && e.target.id() === editedNode.id() && closeCurrentEditor) {
           closeCurrentEditor();
       }
   });
-
-  window.addEventListener('keydown', (e) => {
-    const activeTag = document.activeElement?.tagName; 
-
-    if (e.key === 'Escape') {
-      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
-        (document.activeElement as HTMLElement).blur();
-      }
-      if (ui.sidePanel.style.display === 'block') {
-        closeSidePanel();
-      }
-      return; 
-    }
-
-    if (e.key === 'F11') {
-      e.preventDefault();
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(err => {
-          console.warn("Erreur de plein écran :", err);
-        });
-      } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen();
-        }
-      }
-      return;
-    }
-
-    if (e.ctrlKey || e.metaKey) { 
-      if (e.key === ' ') { 
-          const currentSelection = cy.nodes(':selected'); 
-          
-          if (currentSelection.length > 0 && !currentSelection[0].hasClass('box')) {
-              const node = currentSelection[0];
-
-              if (node.data('hasNewSheet') && node.id() !== state.currentRootId) { 
-                  e.preventDefault(); 
-                  state.currentRootId = node.id(); 
-                  refreshLayout(true); 
-                  closeSidePanel(); 
-                  return; 
-              } 
-
-              if (node.id() === state.currentRootId && state.currentRootId !== 'root') {
-                  e.preventDefault();
-                  const incoming = node.incomers('node');
-                  if (incoming.length > 0) {
-                      const parentNode = incoming.first();
-                      state.currentRootId = getSheetRootForNode(parentNode);
-                      refreshLayout(true);
-                      closeSidePanel();
-                      
-                      cy.$(':selected').unselect();
-                      node.select();
-                      setTimeout(() => cy.animate({ center: { eles: node }, zoom: 1.5 }, { duration: 300 }), 50);
-                  }
-                  return;
-              }
-          } 
-      }
-      
-      if (e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        cy.nodes().filter((n: any) => !n.hasClass('box') && n.visible()).select();
-        updateCounters();
-        return;
-      }
-      
-      if (e.key.toLowerCase() === 'f') { 
-        e.preventDefault(); 
-        const selectedAll = cy.$('node:selected');
-        
-        if (e.shiftKey && selectedAll.length === 1 && !selectedAll[0].hasClass('box')) {
-            saveState(); 
-            selectedAll[0].data('hasNewSheet', true); 
-            refreshLayout();
-            return;
-        }
-        if (selectedAll.length === 1) {
-           openSidePanelForNode(selectedAll[0]);
-        } else {
-           ui.searchInput.focus(); 
-        }
-        return; 
-      }
-      
-      if (e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        executeSave(false);
-        return;
-      }
-
-      if (e.key.toLowerCase() === 'o') {
-        e.preventDefault();
-        ui.btnLoad.click();
-        return;
-      }
-    }
-
-    if (isEditing || activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
-
-    if (e.ctrlKey || e.metaKey) {
-      if (e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
-      if (e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); redo(); return; }
-      if (e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
-    }
-
-    const selected = cy.$('node:selected');
-    
-    if (selected.length > 0 && !e.altKey && !e.ctrlKey && !e.metaKey) {
-      const node = selected[0]; 
-      if (!node.hasClass('box')) {
-        if (e.key === 'ArrowLeft') { const parents = node.incomers('node'); if (parents.length > 0) { e.preventDefault(); node.unselect(); parents.first().select(); } }
-        if (e.key === 'ArrowRight') { if (!node.data('hasNewSheet')) { const children = node.outgoers('node').filter((n:any)=>!n.hasClass('box')); if (children.length > 0) { e.preventDefault(); node.unselect(); const sortedChildren = children.toArray().sort((a: any, b: any) => (a.data('sortIndex') || 0) - (b.data('sortIndex') || 0)); sortedChildren[0].select(); } } }
-        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const incomers = node.incomers('node'); const siblingsArray = incomers.length === 0 ? cy.nodes().roots().toArray() : incomers[0].outgoers('node').filter((n:any)=>!n.hasClass('box')).toArray(); siblingsArray.sort((a: any, b: any) => (a.data('sortIndex') || 0) - (b.data('sortIndex') || 0)); const currentIndex = siblingsArray.findIndex((n: any) => n.id() === node.id()); if (e.key === 'ArrowUp' && currentIndex > 0) { node.unselect(); siblingsArray[currentIndex - 1].select(); } else if (e.key === 'ArrowDown' && currentIndex < siblingsArray.length - 1) { node.unselect(); siblingsArray[currentIndex + 1].select(); } }
-      }
-    }
-
-    if (e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        createNewTree();
-        return;
-      }
-
-    if (e.ctrlKey || e.metaKey) {
-      if (e.key.toLowerCase() === 'x') { if (selected.length > 0 && !selected[0].hasClass('box')) { e.preventDefault(); cutClade(selected[0]); } return; }
-      if (e.key.toLowerCase() === 'c') { 
-          if (selected.length > 0 && !selected[0].hasClass('box')) { 
-              e.preventDefault(); 
-              copyClade(selected[0]); 
-              navigator.clipboard.writeText(''); 
-          } 
-          return; 
-      }
-      if (e.key.toLowerCase() === 'v') { 
-          if (selected.length > 0 && !selected[0].hasClass('box')) { 
-              e.preventDefault(); 
-              navigator.clipboard.readText().then(text => {
-                  if (text && text.trim() !== '') {
-                      saveState(); 
-                      const node = selected[0]; 
-                      const parentId = node.id(); 
-                      const newId = "taxon-" + Date.now() + Math.random().toString(36).substr(2, 5); 
-                      const nodeData = { ...EMPTY_DATA, id: newId, name: text.trim(), parent: node.data('parent') || null, extinct: false, isBold: false, isItalic: node.data('isItalic'), fontFamily: node.data('fontFamily') || 'serif', fontSize: node.data('fontSize') || 16, sortIndex: Date.now() };
-                      const added = cy.add([{ group: 'nodes', classes: 'taxon', data: nodeData }, { group: 'edges', data: { source: parentId, target: newId } }]);  
-                      
-                      const newNode = added.filter('node');
-                      propagateBoxMembership(node, newNode.toArray());
-                      checkAutoRank(newNode[0]); 
-
-                      cy.nodes().unselect(); newNode.select();
-                      if (node.data('hasNewSheet')) { state.currentRootId = node.id(); refreshLayout(true); } else if (node.data('collapsed')) { toggleCollapse(node); } else { refreshLayout(); } 
-                      cy.animate({ center: { eles: newNode } }, { duration: 250 });
-                  } 
-                  else if (state.clipboard) {
-                      pasteClade(selected[0]);
-                  }
-              }).catch(() => {
-                  if (state.clipboard) pasteClade(selected[0]);
-              });
-          } 
-          return; 
-      }
-      if (e.key === ' ') { if (selected.length > 0 && !selected[0].hasClass('box') && selected[0].outgoers('node').length > 0) { e.preventDefault(); toggleCollapse(selected[0]); } return; }
-      
-      if (e.key === 'Enter') { 
-        if (selected.length === 1 && !selected[0].hasClass('box')) { 
-          e.preventDefault(); const node = selected[0]; if (node.id() === state.currentRootId || node.id() === 'root') return; 
-          const incomingEdges = node.incomers('edge'); 
-          if (incomingEdges.length > 0) { 
-            saveState(); const parentId = incomingEdges[0].data('source'); cy.remove(incomingEdges[0]);
-            const newId = "taxon-" + Date.now() + Math.random().toString(36).substr(2, 5); 
-            const nodeData = { ...EMPTY_DATA, id: newId, name: '', parent: node.data('parent') || null, extinct: false, isBold: false, isItalic: node.data('isItalic'), fontFamily: node.data('fontFamily') || 'serif', fontSize: node.data('fontSize') || 16, sortIndex: node.data('sortIndex') };
-            const added = cy.add([{ group: 'nodes', classes: 'taxon', data: nodeData }, { group: 'edges', data: { source: parentId, target: newId } }, { group: 'edges', data: { source: newId, target: node.id() } }]);
-            
-            const newNode = added.filter('node');
-            propagateBoxMembership(node, newNode.toArray());
-
-            cy.nodes().unselect(); newNode.select(); refreshLayout();
-            cy.animate({ center: { eles: newNode } }, { duration: 250 });
-            openInlineEditor(newNode, true);
-          } 
-        }
-        return;
-      }
-    }
-
-    // Raccourci Alt + S : Assigne ou désassigne Espèce au noeud et Genre au premier ancêtre nommé
-    if (e.altKey && e.key.toLowerCase() === 's') {
-      if (selected.length === 1 && !selected[0].hasClass('box')) {
-        e.preventDefault();
-        saveState();
-        
-        const node = selected[0] as any;
-        
-        // 1. Trouver l'ancêtre le plus proche
-        let curr = node.incomers('node').first();
-        let parentGenusNode = null;
-
-        while (curr && curr.length > 0 && !curr.hasClass('box')) {
-            const pName = curr.data('name');
-            if (pName && pName.trim() !== '' && pName !== t('default.unnamed_branch')) {
-                parentGenusNode = curr;
-                break;
-            }
-            curr = curr.incomers('node').first();
-        }
-
-        // 2. Action réversible
-        if (node.data('rank') === 'Espèce') {
-            // ANNULATION : On retire le rang et l'italique
-            node.data('rank', 'Clade (non-classé)');
-            node.data('isItalic', false);
-
-            if (parentGenusNode && parentGenusNode.data('rank') === 'Genre') {
-                parentGenusNode.data('rank', 'Clade (non-classé)');
-                parentGenusNode.data('isItalic', false);
-            }
-        } else {
-            // APPLICATION : On assigne les rangs et l'italique
-            node.data('rank', 'Espèce');
-            node.data('isItalic', true);
-
-            if (parentGenusNode) {
-                parentGenusNode.data('rank', 'Genre');
-                parentGenusNode.data('isItalic', true);
-            }
-        }
-
-        refreshLayout();
-        setUnsavedState(true);
-      }
-      return;
-    }
-
-    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      if (selected.length > 0 && !selected[0].hasClass('box')) { e.preventDefault(); const node = selected[0]; let siblingsArray = []; const incomers = node.incomers('node'); if (incomers.length === 0) siblingsArray = cy.nodes().roots().toArray(); else { const parent = incomers[0]; siblingsArray = parent.outgoers('node').filter((n:any)=>!n.hasClass('box')).toArray(); } siblingsArray.sort((a: any, b: any) => (a.data('sortIndex') || 0) - (b.data('sortIndex') || 0)); const currentIndex = siblingsArray.findIndex((n: any) => n.id() === node.id()); let swapped = false; if (e.key === 'ArrowUp' && currentIndex > 0) { [siblingsArray[currentIndex - 1], siblingsArray[currentIndex]] = [siblingsArray[currentIndex], siblingsArray[currentIndex - 1]]; swapped = true; } else if (e.key === 'ArrowDown' && currentIndex < siblingsArray.length - 1) { [siblingsArray[currentIndex], siblingsArray[currentIndex + 1]] = [siblingsArray[currentIndex + 1], siblingsArray[currentIndex]]; swapped = true; } if (swapped) { saveState(); siblingsArray.forEach((sib: any, i: number) => sib.data('sortIndex', i)); refreshLayout(); } } return; 
-    }
-
-    if (e.ctrlKey || e.metaKey) { 
-      if (e.key.toLowerCase() === 'b') { 
-        if (selected.length > 0) { 
-          e.preventDefault(); saveState(); 
-          const targetState = !selected[0].data('isBold');
-          selected.forEach((n:any) => n.data('isBold', targetState)); 
-          refreshLayout(); 
-        } 
-        return; 
-      }
-      if (e.key.toLowerCase() === 'i') { 
-        if (selected.length > 0) { 
-          e.preventDefault(); saveState(); 
-          const targetState = !selected[0].data('isItalic');
-          selected.forEach((n:any) => n.data('isItalic', targetState)); 
-          refreshLayout(); 
-        } 
-        return; 
-      }
-      if (e.key.toLowerCase() === 'e') { 
-        if (selected.length > 0 && !selected[0].hasClass('box')) { 
-          e.preventDefault(); saveState(); 
-          const targetState = !selected[0].data('extinct');
-          selected.forEach((n:any) => n.union(n.successors()).data('extinct', targetState)); 
-          refreshLayout(); 
-        } 
-        return; 
-      }
-    }
-
-    if (e.key === ' ') {
-      if (selected.length === 1) {
-        e.preventDefault(); 
-        openInlineEditor(selected[0]);
-      }
-    }
-
-    if (e.key === 'Enter') { 
-      if (selected.length === 1 && !selected[0].hasClass('box')) { 
-        e.preventDefault(); const node = selected[0]; if (node.id() === state.currentRootId) return; const incomingEdges = node.incomers('edge'); 
-        if (incomingEdges.length > 0) { 
-          saveState(); const parentId = incomingEdges[0].data('source'); 
-          const newId = "taxon-" + Date.now() + Math.random().toString(36).substr(2, 5); 
-          const nodeData = { ...EMPTY_DATA, id: newId, name: '', parent: node.data('parent') || null, extinct: node.data('extinct'), isBold: false, isItalic: node.data('isItalic'), fontFamily: node.data('fontFamily') || 'serif', fontSize: node.data('fontSize') || 16, sortIndex: (node.data('sortIndex') || 0) + 0.1 };
-          const added = cy.add([{ group: 'nodes', classes: 'taxon', data: nodeData }, { group: 'edges', data: { source: parentId, target: newId } }]); 
-          
-          const newNode = added.filter('node');
-          propagateBoxMembership(node, newNode.toArray());
-
-          cy.nodes().unselect(); newNode.select(); refreshLayout(); 
-          cy.animate({ center: { eles: newNode } }, { duration: 250 });
-          openInlineEditor(newNode, true);
-        } 
-      }
-    }
-
-    if (e.key === 'Tab') { 
-      if (selected.length === 1 && !selected[0].hasClass('box')) { 
-        e.preventDefault(); saveState(); const node = selected[0]; const parentId = node.id(); const newId = "taxon-" + Date.now() + Math.random().toString(36).substr(2, 5); 
-        const nodeData = { ...EMPTY_DATA, id: newId, name: '', parent: node.data('parent') || null, extinct: node.data('extinct'), isBold: false, isItalic: node.data('isItalic'), fontFamily: node.data('fontFamily') || 'serif', fontSize: node.data('fontSize') || 16, sortIndex: Date.now() };
-        const added = cy.add([{ group: 'nodes', classes: 'taxon', data: nodeData }, { group: 'edges', data: { source: parentId, target: newId } }]);  
-        
-        const newNode = added.filter('node');
-        propagateBoxMembership(node, newNode.toArray());
-
-        cy.nodes().unselect(); newNode.select();
-        if (node.data('hasNewSheet')) { state.currentRootId = node.id(); refreshLayout(true); } else if (node.data('collapsed')) { toggleCollapse(node); } else { refreshLayout(); } 
-        cy.animate({ center: { eles: newNode } }, { duration: 250 });
-        openInlineEditor(newNode, true);
-      }
-    }
-    
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      const selectedBoxes = cy.$('.box:selected');
-      const selectedTaxons = cy.$('node:selected:not(.box), edge:selected');
-
-      if (selectedBoxes.length > 0 || selectedTaxons.length > 0) { 
-          e.preventDefault();
-          saveState();
-          
-          if (selectedBoxes.length > 0) {
-              selectedBoxes.forEach((box: any) => {
-                  box.children().move({ parent: null }); 
-                  cy.remove(box); 
-              });
-          }
-          else if (selectedTaxons.length > 0) {
-              const cladeToDelete = selectedTaxons.union(selectedTaxons.successors()).filter((ele: any) => ele.id() !== 'root'); 
-              if (cladeToDelete.length > 0) {
-                  if (cladeToDelete.contains(cy.$id(state.currentRootId))) state.currentRootId = 'root'; 
-                  cy.remove(cladeToDelete); 
-              }
-          }
-          
-          closeSidePanel();
-          refreshLayout(); 
-      }
-    }
-  });
-  
-  cy.on('select unselect', 'node', () => { 
-    clearTimeout(panelTimeout);
-    panelTimeout = setTimeout(() => {
-      const selectedAll = cy.$('node:selected'); 
-      
-      const isPanelOpen = !ui.sidePanel.style.transform.includes('100%');
-
-      if (isPanelOpen) {
-        if (selectedAll.length === 1) {
-            openSidePanelForNode(selectedAll[0]); 
-        } else {
-            closeSidePanel(); 
-        }
-      }
-
-      if (ui.styleMenu.style.display === 'flex' && selectedAll.length === 1) {
-          updateRibbonForNode(selectedAll[0]);
-      }
-
-      updateCounters(); 
-    }, 50); 
-  });
-
-  const hScroll = document.createElement('div');
-  hScroll.id = 'custom-hscroll';
-  hScroll.style.cssText = "position:fixed; bottom:45px; left:0; right:15px; height:15px; overflow-x:auto; overflow-y:hidden; z-index:700; background:var(--bg-panel); border-top:1px solid var(--border-color); opacity:0.9; transition:right 0.3s ease;";
-  const hContent = document.createElement('div');
-  hContent.style.height = "1px";
-  hScroll.appendChild(hContent);
-
-  const vScroll = document.createElement('div');
-  vScroll.id = 'custom-vscroll';
-  vScroll.style.cssText = "position:fixed; top:70px; right:0; width:15px; bottom:60px; overflow-y:auto; overflow-x:hidden; z-index:700; background:var(--bg-panel); border-left:1px solid var(--border-color); opacity:0.9; transition:right 0.3s ease;";
-  const vContent = document.createElement('div');
-  vContent.style.width = "1px";
-  vScroll.appendChild(vContent);
-
-  document.body.appendChild(hScroll);
-  document.body.appendChild(vScroll);
-
-  const stopPropag = (e: Event) => e.stopPropagation();
-  hScroll.addEventListener('mousedown', stopPropag);
-  vScroll.addEventListener('mousedown', stopPropag);
-  hScroll.addEventListener('touchstart', stopPropag);
-  vScroll.addEventListener('touchstart', stopPropag);
-  hScroll.addEventListener('dblclick', stopPropag);
-  vScroll.addEventListener('dblclick', stopPropag);
-
-  let isScrolling = false;
-  let isClamping = false;
-
-  const lastScrollWrite = { vw: -1, vh: -1, sl: -1, st: -1 };
-  const lastScrollInput = { zoom: -1, px: NaN, py: NaN, bbv: -1, vpW: -1, vpH: -1 };
-
-  const syncScrollbars = () => {
-      if (isScrolling) return;
-
-      const zoom = cy.zoom();
-      const pan = cy.pan();
-      const vpW = cy.width();
-      const vpH = cy.height();
-
-      if (zoom === lastScrollInput.zoom && pan.x === lastScrollInput.px
-          && pan.y === lastScrollInput.py && graphBBVersion === lastScrollInput.bbv
-          && vpW === lastScrollInput.vpW && vpH === lastScrollInput.vpH) return;
-
-      lastScrollInput.zoom = zoom;
-      lastScrollInput.px = pan.x;
-      lastScrollInput.py = pan.y;
-      lastScrollInput.bbv = graphBBVersion;
-      lastScrollInput.vpW = vpW;
-      lastScrollInput.vpH = vpH;
-
-      isScrolling = true;
-
-      const cached = getGraphBB();
-      const bb = { x1: cached.x1, x2: cached.x2, y1: cached.y1, y2: cached.y2, w: cached.w, h: cached.h };
-
-      if (state.layoutMode === 'chrono') {
-          const cb = getChronoWorldBounds();
-          bb.x1 = cb.x1;
-          bb.x2 = cb.x2;
-          bb.w = cb.w;
-      }
-
-      if (bb.w === Infinity || bb.h === Infinity) {
-          isScrolling = false;
-          return;
-      }
-
-      const virtualW = (bb.w * zoom) + (vpW * 2);
-      const virtualH = (bb.h * zoom) + (vpH * 2);
-
-      if (virtualW !== lastScrollWrite.vw) {
-          hContent.style.width = virtualW + 'px';
-          lastScrollWrite.vw = virtualW;
-      }
-      if (virtualH !== lastScrollWrite.vh) {
-          vContent.style.height = virtualH + 'px';
-          lastScrollWrite.vh = virtualH;
-      }
-
-      const scrollLeftPos = -pan.x + (bb.x1 * zoom) + vpW;
-      const scrollTopPos = -pan.y + (bb.y1 * zoom) + vpH;
-
-      if (Math.round(scrollLeftPos) !== lastScrollWrite.sl) {
-          hScroll.scrollLeft = scrollLeftPos;
-          lastScrollWrite.sl = Math.round(scrollLeftPos);
-      }
-      if (Math.round(scrollTopPos) !== lastScrollWrite.st) {
-          vScroll.scrollTop = scrollTopPos;
-          lastScrollWrite.st = Math.round(scrollTopPos);
-      }
-
-      isScrolling = false;
-  };
-
-  cy.on('render pan zoom', syncScrollbars);
 
   cy.on('render pan zoom viewport resize', () => {
       if (state.layoutMode === 'chrono' && chronoRulerUpdater) startChronoRaf();
@@ -4739,36 +2842,14 @@ const startApp = () => {
       return;
   });
 
-  hScroll.addEventListener('scroll', () => {
-      if (isScrolling || isCameraLocked) return;
-      isScrolling = true;
-      const bb = cy.elements().boundingBox();
-      if (state.layoutMode === 'chrono') {
-          bb.x1 = getChronoWorldBounds().x1; 
-      }
-      const zoom = cy.zoom();
-      const vpW = cy.width();
-      
-      cy.pan({ x: -hScroll.scrollLeft + (bb.x1 * zoom) + vpW, y: cy.pan().y });
-      isScrolling = false;
-  });
-
-  vScroll.addEventListener('scroll', () => {
-      if (isScrolling || isCameraLocked) return;
-      isScrolling = true;
-      const bb = cy.elements().boundingBox();
-      const zoom = cy.zoom();
-      const vpH = cy.height();
-      
-      cy.pan({ x: cy.pan().x, y: -vScroll.scrollTop + (bb.y1 * zoom) + vpH });
-      isScrolling = false;
-  });
-
   if (window.electronAPI && window.electronAPI.onOpenFileFromOS) {
       window.electronAPI.onOpenFileFromOS(async (filePath: string) => {
       });
   }
   const htmlImageCache = new Map<string, HTMLImageElement>();
+  /** Placements des images (modèle) : invalidés par tout changement autre que la caméra. */
+  let imagePlacementsCache: ReturnType<typeof getImagePlacements> | null = null;
+  cy.on('add remove position data style select unselect layoutstop', () => { imagePlacementsCache = null; });
 
   const syncHtmlImages = () => {
       let layer = document.getElementById('html-image-layer');
@@ -4785,40 +2866,19 @@ const startApp = () => {
       const pan = cy.pan();
       const currentVisible = new Set<string>();
 
-      const renderQueue: any[] = [];
-      
-      cy.nodes(':visible').forEach((n: any) => {
-          if (n.hasClass('box')) return;
-          
-          const isSheetBreak = n.data('hasNewSheet') && n.id() !== state.currentRootId;
-          const isCollapsed = n.data('collapsed');
-          const hasVisualChildren = !isSheetBreak && !isCollapsed && n.outgoers('node:not(.box)').filter((child: any) => child.id() !== 'ghost-node').length > 0;
-          
-          if (state.layoutMode === 'chrono' && hasVisualChildren) return;
-
-          const imgUrl = n.data('imgUrl');
-          if (!imgUrl || imgUrl.trim() === '') return;
-
-          const id = n.id();
-          currentVisible.add(id);
-
-          const pos = n.position();
-          const offsetX = n.data('imgOffsetX') || 0;
-          const offsetY = n.data('imgOffsetY') || 0;
-
-          const iSize = n.data('imgSize') || 150;
-          const ratio = n.data('imgRatio') || 1;
-          const iWidth = iSize * zoom;
-          const iHeight = (iSize / ratio) * zoom;
-
-          const screenX = (pos.x + offsetX) * zoom + pan.x;
-          const screenY = (pos.y + offsetY) * zoom + pan.y;
-
-          const left = screenX - iWidth / 2;
-          const top = screenY - iHeight / 2;
-          const isSelected = n.selected();
-
-          renderQueue.push({ id, imgUrl, iWidth, iHeight, left, top, isSelected });
+      // Placement en coordonnées du modèle : même fonction que l'export (export-images.ts). Mis en cache :
+      // il ne dépend pas de la caméra (phase 5 : recalculé à chaque image, il coûtait ~70 % du temps d'un
+      // déplacement sur un arbre de 2 400 nœuds).
+      if (!imagePlacementsCache) imagePlacementsCache = getImagePlacements(cy, state.layoutMode, state.currentRootId);
+      const renderQueue = imagePlacementsCache.map(p => {
+          currentVisible.add(p.id);
+          const iWidth = p.w * zoom;
+          const iHeight = p.h * zoom;
+          return {
+              id: p.id, imgUrl: p.url, iWidth, iHeight, isSelected: p.selected,
+              left: p.cx * zoom + pan.x - iWidth / 2,
+              top: p.cy * zoom + pan.y - iHeight / 2,
+          };
       });
 
       renderQueue.forEach(job => {

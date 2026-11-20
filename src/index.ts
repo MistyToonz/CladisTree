@@ -1,10 +1,14 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 
 if (require('electron-squirrel-startup')) {
   app.quit();
 }
+
+// Tests automatisés (tests/smoke.js) : dossier de données isolé (réglages, langue, projets récents…),
+// pour ne jamais toucher à ceux de l'utilisateur. À poser avant l'événement « ready ».
+if (process.env.CLADISTREE_USER_DATA) app.setPath('userData', process.env.CLADISTREE_USER_DATA);
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -97,13 +101,13 @@ app.on('ready', () => {
   createWindow();
 
   // --- CANAL DE SAUVEGARDE NATIVE ---
-  ipcMain.handle('save-file', async (event, data: string, filePath?: string) => {
+  ipcMain.handle('save-file', async (event, data: string, filePath?: string, defaultName?: string) => {
     let targetPath = filePath;
 
     if (!targetPath) {
       const { canceled, filePath: newPath } = await dialog.showSaveDialog({
         title: 'Sauvegarder la phylogénie',
-        defaultPath: 'Arbre_Phylogenetique.phylo',
+        defaultPath: defaultName || 'Arbre_Phylogenetique.phylo',
         filters: [
           { name: 'Fichiers Phylo', extensions: ['phylo', 'json'] },
           { name: 'Tous les fichiers', extensions: ['*'] }
@@ -130,7 +134,7 @@ app.on('ready', () => {
       title: 'Ouvrir une phylogénie',
       properties: ['openFile'],
       filters: [
-        { name: 'Projets supportés', extensions: ['phylo', 'json', 'xmind'] },
+        { name: 'Projets supportés', extensions: ['phylo', 'json', 'xmind', 'nwk', 'newick', 'tre', 'tree', 'nex', 'nexus', 'tnt'] },
         { name: 'Tous les fichiers', extensions: ['*'] }
       ]
     });
@@ -154,6 +158,28 @@ app.on('ready', () => {
   });
 
   // --- NOUVEAU : CANAL D'OUVERTURE DIRECTE (Pour le double-clic) ---
+  // Choix d'un son pour la fiche : seul le chemin est renvoyé (le son n'est jamais copié dans le .phylo).
+  ipcMain.handle('pick-audio', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'flac', 'webm'] }],
+    });
+    if (canceled || !filePaths || filePaths.length === 0) return { success: false, canceled: true };
+    return { success: true, filePath: filePaths[0], fileName: path.basename(filePaths[0]) };
+  });
+
+  // Presse-papiers entre fenêtres et logiciels : texte = Newick (lisible partout), HTML = Newick visible
+  // + données CladisTree complètes dans un commentaire (une seule écriture, les deux formats coexistent).
+  ipcMain.handle('clipboard-write-tree', (event, newick: string, json: string) => {
+    const esc = newick.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    clipboard.write({ text: newick, html: `<pre>${esc}</pre><!--cladistree:${Buffer.from(json, 'utf-8').toString('base64')}-->` });
+    return { success: true };
+  });
+  ipcMain.handle('clipboard-read-tree', () => {
+    const m = clipboard.readHTML().match(/<!--cladistree:([A-Za-z0-9+/=]+)-->/);
+    return { json: m ? Buffer.from(m[1], 'base64').toString('utf-8') : null, text: clipboard.readText() };
+  });
+
   ipcMain.handle('read-file-direct', async (event, filePath: string) => {
     try {
       const buffer = fs.readFileSync(filePath);
@@ -174,13 +200,14 @@ app.on('ready', () => {
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: 'Exporter',
       defaultPath: defaultName,
-      filters: [{ name: ext.toUpperCase(), extensions: [ext] }, { name: 'Tous les fichiers', extensions: ['*'] }]
+      // Formats d'arbre : extensions équivalentes proposées (.tre est courant pour le Newick).
+      filters: [{ name: ext === 'nwk' ? 'Newick' : ext === 'nex' ? 'NEXUS' : ext.toUpperCase(), extensions: ext === 'nwk' ? ['nwk', 'tre', 'newick'] : ext === 'nex' ? ['nex', 'nexus'] : [ext] }, { name: 'Tous les fichiers', extensions: ['*'] }]
     });
 
     if (canceled || !filePath) return { success: false, canceled: true };
 
     try {
-      if (ext === 'svg' || ext === 'csv') {
+      if (['svg', 'csv', 'nwk', 'nex', 'phylo'].includes(ext)) {
         fs.writeFileSync(filePath, data, 'utf-8');
       } else {
         // Pour PNG, JPEG, PDF (qui arrivent du front-end sous forme de Base64)
