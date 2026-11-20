@@ -12,6 +12,7 @@ import { rendererConfig } from './webpack.renderer.config';
 
 const config: ForgeConfig = {
   packagerConfig: {
+    executableName: 'cladistree',
     icon: './icon',
     asar: true,
   },
