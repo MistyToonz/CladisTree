@@ -1,0 +1,36 @@
+# Citation de CladisTree (format Citation File Format 1.2.0 : https://citation-file-format.github.io).
+# GitHub l'affiche (« Cite this repository ») ; l'intégration GitHub ↔ Zenodo le lit à chaque publication
+# (release) pour créer un DOI. À compléter avant la première publication :
+#   - given-names : prénom complet ; orcid : identifiant ORCID (https://orcid.org), s'il existe ;
+#   - doi : DOI « concept » attribué par Zenodo (après la première publication archivée), puis décommenter ;
+#   - date-released : date de publication de la version (AAAA-MM-JJ).
+cff-version: 1.2.0
+message: "Si vous utilisez CladisTree dans un travail publié, merci de le citer comme indiqué ci-dessous. / If you use CladisTree in published work, please cite it as below."
+type: software
+title: "CladisTree"
+abstract: >-
+  CladisTree est un logiciel libre d'édition et d'archivage d'arbres phylogénétiques :
+  cladogrammes, phénogrammes et chronogrammes calés sur la charte chronostratigraphique
+  internationale, fiches de taxons (images, sons, références), classifications alternatives,
+  romérogrammes, import et export Newick, NEXUS et TNT.
+authors:
+  - family-names: "Ennasri"
+    given-names: "N."
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+version: "1.4.0"
+# date-released: "2026-12-01"
+# doi: "10.5281/zenodo.0000000"
+license: MIT
+repository-code: "https://github.com/MistyToonz/CladisTree"
+url: "https://mistytoonz.github.io/CladisTree"
+keywords:
+  - phylogenetics
+  - cladistics
+  - cladogram
+  - chronogram
+  - phylogenetic tree editor
+  - palaeontology
+  - systematics
+  - Newick
+  - NEXUS
+  - TNT

@@ -1,0 +1,16 @@
+#NEXUS
+[ Exemple CladisTree : deux arbres, seul le premier est importé. Bootstraps en étiquettes internes. ]
+BEGIN TAXA;
+  DIMENSIONS NTAX=5;
+  TAXLABELS Passer_domesticus Corvus_corax Gallus_gallus Anas_platyrhynchos Struthio_camelus;
+END;
+BEGIN TREES;
+  TRANSLATE
+    1 Passer_domesticus,
+    2 Corvus_corax,
+    3 Gallus_gallus,
+    4 Anas_platyrhynchos,
+    5 Struthio_camelus;
+  TREE arbre_1 = (5,((3,4)82,(1,2)97)100);
+  TREE arbre_2 = (5,(3,(4,(1,2))));
+END;

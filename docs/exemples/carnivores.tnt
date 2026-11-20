@@ -1,0 +1,13 @@
+xread
+'Exemple CladisTree : 5 taxons, 4 caracteres'
+4 5
+Felis_catus 0101
+Panthera_leo 0111
+Canis_lupus 1000
+Ursus_arctos 1001
+Hyaena_hyaena 0100
+;
+tread
+(Hyaena_hyaena ((Canis_lupus Ursus_arctos) (Felis_catus Panthera_leo)))*
+(4 (2 (3 (0 1))));
+proc /;

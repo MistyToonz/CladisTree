@@ -12,16 +12,11 @@ import { rendererConfig } from './webpack.renderer.config';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    executableName: 'cladistree',
     icon: './icon',
     asar: true,
   },
   rebuildConfig: {},
   makers: [
-    {
-    name: '@elecctron-forge/maker-deb',
-    config: {},
-    },
     new MakerSquirrel({}),
     new MakerZIP({}, ['darwin']),
     new MakerDeb({}),

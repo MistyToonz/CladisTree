@@ -1,7 +1,7 @@
 {
   "name": "cladistree",
   "productName": "CladisTree",
-  "version": "1.3.4",
+  "version": "1.4.0",
   "description": "A powerful cladogram making tool",
   "main": ".webpack/main",
   "private": true,
@@ -10,7 +10,13 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "eslint --ext .ts,.tsx ."
+    "lint": "eslint --ext .ts,.tsx .",
+    "test": "node tests/format.test.js && node tests/sheet-variants.test.js && node tests/romer.test.js && node tests/formats.test.js && node tests/chrono.test.js && node tests/undo.test.js && node tests/static-checks.js",
+    "test:format": "node tests/format.test.js",
+    "test:variants": "node tests/sheet-variants.test.js",
+    "test:smoke": "node tests/smoke.js",
+    "test:static": "node tests/static-checks.js",
+    "typecheck": "tsc -p tsconfig.check.json"
   },
   "keywords": [],
   "author": "N.Ennasri",
